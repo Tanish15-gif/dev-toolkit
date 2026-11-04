@@ -5,8 +5,13 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("AuthDatabase")
-    ?? throw new InvalidOperationException("Configure ConnectionStrings:AuthDatabase.");
+// Keep this key consistent with appsettings.json and the application's User Secrets.
+var connectionString = builder.Configuration.GetConnectionString("YourAppDataBase");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Configure ConnectionStrings:YourAppDataBase.");
+}
 
 builder.Services.AddAuthentication(AuthSchemes.CustomJwt);
 builder.Services.AddDevToolkitAuth(

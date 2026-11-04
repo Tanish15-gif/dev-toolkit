@@ -21,3 +21,6 @@ appsettings.*.json
 # Verification output
 TestResults/
 artifacts/
+
+# Local documentation images are hosted separately on GitHub.
+/docs/images/
