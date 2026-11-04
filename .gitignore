@@ -1,14 +1,23 @@
+# Build output and local IDE state
 **/bin/
 **/obj/
 .vs/
-**/TestResults/
+.idea/
+.vscode/
 *.user
 *.suo
-*.db
-*.db-shm
-*.db-wal
+*.log
+
+# Local configuration and secrets
+appsettings.*.json
+!appsettings.json
 .env
 .env.*
 !.env.example
-**/appsettings.Local.json
-**/appsettings.Development.json
+*.pfx
+*.p12
+*.key
+
+# Verification output
+TestResults/
+artifacts/

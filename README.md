@@ -1,510 +1,301 @@
-# DevToolkit Auth and Backend Utilities
+# DevToolkit Auth
 
-Reusable authentication and backend utilities for ASP.NET Core 10. Reference the
-library from your own application, configure it, create the database schema,
-and use its authentication endpoints.
+A runnable .NET 10 Web API with authentication source you can copy into an existing API. SQL Server is the default database. All authentication dependencies live in `AuthModule`; there is one application project and no separate library project.
 
-Keep the library namespace as `DevToolkit.Auth`. Your application can have any
-name. In this guide, `YourProject.Api` is an application you create yourself.
-The integration guide is contained entirely in this README.
+Includes email/password registration and login, JWT access tokens, rotating refresh tokens, device sessions, Google sign-in, OTP password recovery, password changes, request limiting, and authentication health checks.
 
-## Features
+## Choose how to use it
 
-- Email/password registration and login with BCrypt.
-- JWT access tokens and hashed, rotating refresh tokens.
-- Google sign-in and Google reauthentication for password setup.
-- Email OTP password recovery with single-use reset sessions.
-- Per-device sessions and immediate account/session revocation checks.
-- User, Admin, and Owner roles with database-backed authorization.
-- Input validation, rate limits, abuse checks, and safe error responses.
-- Configurable SMTP email delivery and application branding.
-- Optional registration hooks and submission retry protection.
-- Public liveness/readiness endpoints and admin-only health diagnostics.
+**Starting a new backend:** clone into an empty folder and build your application here. You do not need to create another Web API.
 
-## Repository layout
+```powershell
+mkdir BeautyParlour
+cd BeautyParlour
+git clone https://github.com/Tanish15-gif/dev-toolkit.git .
+```
+
+The final `.` puts the repository files directly in the current empty folder. Alternatively, run `git clone https://github.com/Tanish15-gif/dev-toolkit.git BeautyParlour` from its parent folder. Git needs a destination directory; it does not merge a repository into an existing application automatically.
+
+**Adding authentication to an existing backend:** clone into a separate temporary folder, then copy only `AuthModule` into your API. Keep your own `Program.cs`, project file, configuration, Git history, and business code. Follow [existing project integration](#existing-project-integration).
 
 ```text
-dev-toolkit/
-├── .gitignore
-├── DevToolkit.slnx
-├── README.md
-└── dotnet/
-    ├── DevToolkit.Auth.csproj
-    ├── GlobalUsings.cs
-    ├── AuthModule/
-    └── Infrastructure/
+README.md
+.gitignore
+AuthModule.sql
+DevToolkit.Api.csproj
+Program.cs
+appsettings.json
+AuthModule/
+    Controllers/
+    DTOs/
+    Entities/
+    Data/
+        AuthDbContext.cs
+        AuthModelConfiguration.cs
+        Migrations/
+    Services/
+        Context/
+        Email/
+    Repositories/
+    Interfaces/
+        Services/
+        Repositories/
+    Authorization/
+    Constants/
+    Enums/
+    Models/
+    Helpers/
+    Exceptions/
+    Middleware/
+    HealthChecks/
+    Extensions/
+    Settings/
 ```
 
-### Why each folder exists
+`bin` and `obj` are generated when you build and are ignored by Git. No folder contains placeholder `.gitkeep` files.
 
-| Folder or file | Purpose |
+## Run a new project
+
+You need the .NET 10 SDK and a SQL Server instance that your Windows account or configured SQL login can access.
+
+### 1. Configure your application
+
+In `appsettings.json`, change these non-secret values:
+
+| Setting | Example |
 | --- | --- |
-| AuthModule/Authorization | Database-backed role authorization |
-| AuthModule/Constants | Authentication schemes, role names, and auth policy names |
-| AuthModule/Controllers | Authentication HTTP endpoints |
-| AuthModule/Data | The reusable auth DbContext |
-| AuthModule/DTOs | Request and response contracts used by the current auth flows |
-| AuthModule/DTOs/Google | Google sign-in and password reauthentication contracts |
-| AuthModule/DTOs/LogInOut | Password login and logout contracts |
-| AuthModule/DTOs/OTP | OTP verification and reset-token responses |
-| AuthModule/DTOs/Passwords | Password change, reset, setup, and session sign-out contracts |
-| AuthModule/DTOs/Session | Device/session response contracts |
-| AuthModule/Entities | Persisted users, roles, tokens, OTPs, sessions, and events |
-| AuthModule/Enums | Auth event types, failure reasons, providers, and OTP purposes |
-| AuthModule/Exceptions | Explicit application errors used by auth and backend helpers |
-| AuthModule/Extensions | Registration, auth middleware integration, and EF mappings |
-| AuthModule/Filters | Expected error responses for authentication controllers |
-| AuthModule/Interfaces | Contracts for data access and registration hooks |
-| AuthModule/Interfaces/Repositories | Database operation contracts |
-| AuthModule/Interfaces/Services | Authentication service contracts |
-| AuthModule/Models | Parsed user-agent details for session information |
-| AuthModule/Repositories | EF operations, atomic token consumption, and session persistence |
-| AuthModule/Services | Credential, Google, token, password, and session behavior |
-| AuthModule/Services/Context | Current user/session access and authentication event logging |
-| AuthModule/Services/Helpers | Email normalization and active-account validation |
-| AuthModule/Settings | JWT, OTP, Google, and application branding options |
-| Infrastructure/Email | SMTP settings and the replaceable email adapter |
-| Infrastructure/Extensions | Backend registration, endpoint metadata, and health endpoint mapping |
-| Infrastructure/HealthChecks | The session-store readiness probe |
-| Infrastructure/Helpers | Shared validation, body limits, problem responses, and health JSON |
-| Infrastructure/Metadata | Attributes selecting optional authentication and retry protection |
-| Infrastructure/Middleware | Error handling, abuse limits, optional auth, and retry protection |
-| Infrastructure/RateLimiting | Rate-limit policy names and trusted client/user keys |
-| Infrastructure/Settings | Backend limits, route selection, retention, and health timeouts |
-| GlobalUsings.cs | Framework imports used by both AuthModule and Infrastructure |
-| DevToolkit.Auth.csproj | Builds both folders as one reusable library |
+| `AppInfo:Name` | `Beauty Parlour` |
+| `JwtSettings:Issuer` | `BeautyParlour.Api` |
+| `JwtSettings:Audience` | `BeautyParlour.Web` |
+| `Cors:AllowedOrigins` | Your frontend origin, such as `http://localhost:5173` |
+| `Email:FromName` | `Beauty Parlour` |
+| `AllowedHosts` | Your deployed API hostname; `localhost` for local use |
 
-Authentication-specific constants live inside AuthModule. Infrastructure contains
-shared backend functionality used by authentication and host application endpoints.
-Reference the complete project file when integrating the toolkit.
+You can keep the project filename and `DevToolkit.Auth` namespaces. Neither must match your application's display name. To rename the starter project, rename `DevToolkit.Api.csproj` and use the new filename in commands below. The next step generates a separate User Secrets ID for your application.
 
-Generated `bin` and `obj` folders are ignored by Git. They reappear when you build;
-they do not belong in a commit. Empty future-feature folders are omitted.
+### 2. Save local secrets
 
-
-## Build the library
-
-Requires the .NET 10 SDK. From the toolkit repository root:
+Run from the folder containing `DevToolkit.Api.csproj`:
 
 ```powershell
-dotnet restore DevToolkit.slnx
-dotnet build DevToolkit.slnx
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:AuthDatabase" "Server=localhost;Database=BeautyParlour;Trusted_Connection=True;Encrypt=True;TrustServerCertificate=True"
+
+$random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$jwtBytes = New-Object byte[] 48
+$otpBytes = New-Object byte[] 32
+$random.GetBytes($jwtBytes)
+$random.GetBytes($otpBytes)
+$random.Dispose()
+
+dotnet user-secrets set "JwtSettings:SecretKey" ([Convert]::ToBase64String($jwtBytes))
+dotnet user-secrets set "Otp:HashKey" ([Convert]::ToBase64String($otpBytes))
 ```
 
-## Integrate into a new application
+Use the server name you connect to in SQL Server Management Studio. `localhost` means a local default instance, not a named instance or LocalDB. The local `TrustServerCertificate=True` example is for development; use a valid server certificate and certificate validation when deploying.
 
-The steps below start with a new API project beside the toolkit checkout. SQLite
-is used for the initial setup so a separate database server is not required.
+The JWT secret and OTP key are required. Their committed values are intentionally empty. Google and email can be configured after testing registration/login. Google sign-in will require a client ID, and password-recovery email will require an email provider.
 
-### 1. Create your application and reference the toolkit
+For deployment, supply secrets through your hosting secret store or environment variables, for example `JwtSettings__SecretKey`, `Otp__HashKey`, and `ConnectionStrings__AuthDatabase`. User Secrets are for development, and server secrets must never go into React configuration.
 
-Run from the directory containing your projects:
+### 3. Restore and create the authentication tables
 
 ```powershell
-git clone https://github.com/Tanish15-gif/dev-toolkit.git dev-toolkit
-dotnet new webapi --use-controllers --framework net10.0 -n YourProject.Api
-dotnet add YourProject.Api/YourProject.Api.csproj reference dev-toolkit/dotnet/DevToolkit.Auth.csproj
-dotnet add YourProject.Api/YourProject.Api.csproj package Microsoft.EntityFrameworkCore.Sqlite --version 10.0.14
-dotnet add YourProject.Api/YourProject.Api.csproj package Microsoft.EntityFrameworkCore.Design --version 10.0.14
-```
-
-Use your existing checkout if you already cloned the repository. Adjust the
-application name and reference path to match your folders. You can also copy the
-complete `dotnet` directory into your application repository and reference its
-project file.
-
-### 2. Configure your application
-
-Merge these sections into your application's `appsettings.json`:
-
-```json
-{
-  "ConnectionStrings": {
-    "AuthDatabase": "Data Source=your-project-auth.db"
-  },
-  "JwtSettings": {
-    "SecretKey": "",
-    "Issuer": "YourProject.Api",
-    "Audience": "YourProject.Client",
-    "AccessTokenMinutes": 15,
-    "RefreshTokenDays": 14,
-    "AbsoluteSessionDays": 30
-  },
-  "Otp": {
-    "HashKey": "",
-    "ExpiryMinutes": 10,
-    "ResendCooldownSeconds": 60,
-    "MaxAttempts": 5,
-    "ResetTokenExpiryMinutes": 10
-  },
-  "AppInfo": {
-    "Name": "Your Project",
-    "SupportEmail": "support@example.com",
-    "BaseUrl": "http://localhost:5000"
-  },
-  "GoogleAuth": {
-    "ClientId": ""
-  },
-  "Smtp": {
-    "Host": "",
-    "Port": 587,
-    "Username": "",
-    "Password": "",
-    "FromEmail": "",
-    "FromName": "Your Project",
-    "UseSsl": false
-  },
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning",
-      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
-    }
-  },
-  "AllowedHosts": "localhost;127.0.0.1",
-  "Backend": {
-    "EnableExceptionHandling": true,
-    "EnableAuthAbuseProtection": true,
-    "AuthPathPrefixes": [
-      "/auth/custom"
-    ],
-    "OptionalAuthenticationPaths": [],
-    "IdempotencyPaths": [],
-    "AuthIpPermitLimit": 60,
-    "AuthAccountPermitLimit": 15,
-    "AuthWindowSeconds": 300,
-    "SessionStoreSlowMilliseconds": 1000,
-    "HealthCheckTimeoutSeconds": 5
-  }
-}
-```
-
-Change the issuer, audience, application name, connection string, and provider
-settings for your project. The empty secret values must be configured separately.
-
-Generate separate JWT and OTP secrets and store them in your application's user-secrets:
-
-```powershell
-dotnet user-secrets init --project YourProject.Api
-
-$jwtSecret = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$otpSecret = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-
-dotnet user-secrets set "JwtSettings:SecretKey" "$jwtSecret" --project YourProject.Api
-dotnet user-secrets set "Otp:HashKey" "$otpSecret" --project YourProject.Api
-```
-
-The JWT secret must contain at least 32 UTF-8 bytes. The OTP key must be Base64
-encoding of at least 32 random bytes. Token lifetime keys are `AccessTokenMinutes`,
-`RefreshTokenDays`, and `AbsoluteSessionDays`. Invalid JWT/OTP settings fail startup.
-
-Registration and password login can be verified before configuring Google or SMTP.
-Set GoogleAuth:ClientId for Google sign-in. Set SMTP Host, Port, FromEmail, FromName,
-and your provider's Username/Password to deliver password recovery emails.
-Store the SMTP password in user-secrets or your deployment secret store.
-
-SMTP uses required STARTTLS by default, typically on port 587. Set `UseSsl: true`
-for implicit TLS, typically on port 465. A custom `IEmailService` can be registered
-before `AddDevToolkitAuth` to use a different email provider.
-
-In production, use your secret store or environment variables such as
-`JwtSettings__SecretKey`, `Otp__HashKey`, and `Smtp__Password`.
-
-### 3. Register the toolkit in your Program.cs
-
-```csharp
-using System.Security.Claims;
-using DevToolkit.Auth.Extensions;
-using DevToolkit.Infrastructure.Extensions;
-using Microsoft.EntityFrameworkCore;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddDevToolkitAuth(builder.Configuration, database =>
-    database.UseSqlite(
-        builder.Configuration.GetConnectionString("AuthDatabase"),
-        sqlite => sqlite.MigrationsAssembly(typeof(Program).Assembly.FullName)
-    )
-);
-
-var app = builder.Build();
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHsts();
-    app.UseHttpsRedirection();
-}
-
-app.UseRouting();
-app.UseDevToolkitAuth();
-app.MapControllers();
-app.MapDevToolkitHealthChecks();
-
-app.MapGet("/me", (ClaimsPrincipal user) => new
-{
-    UserId = user.FindFirstValue(ClaimTypes.NameIdentifier),
-    Email = user.FindFirstValue(ClaimTypes.Email)
-}).RequireAuthorization();
-
-app.Run();
-```
-
-The module registers its controllers, services, repositories, auth context,
-rate-limit policies, backend middleware dependencies, and session-store health
-check. The migrations assembly is your application, so generated migrations belong
-to your application project.
-
-For browser clients, configure the host's allowed origins and run CORS middleware
-before `UseDevToolkitAuth()`. Behind a reverse proxy, configure trusted proxies
-and run `UseForwardedHeaders()` first.
-
-### 4. Create the database schema
-
-Install the matching EF command-line tool if needed, then generate and apply
-migrations in your application:
-
-```powershell
+dotnet restore
+dotnet build
 dotnet tool install --global dotnet-ef --version 10.0.14
-dotnet ef migrations add InitialAuth --context AuthDbContext --project YourProject.Api --startup-project YourProject.Api
-dotnet ef database update --context AuthDbContext --project YourProject.Api --startup-project YourProject.Api
 ```
 
-The mappings create users, roles, user-role relationships, tokens, OTPs, sessions,
-external logins, and authentication events. User/Admin/Owner roles are initialized;
-registration assigns User. The host controls assignment of administrative roles.
-Normalized email addresses remain reserved after soft deletion.
-
-### 5. Start your API and verify login
+If `dotnet-ef` is already installed, check `dotnet ef --version` and use a compatible EF Core 10 tool version. The starter includes the initial SQL Server migration, so run:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = "Development"
-dotnet run --project YourProject.Api --urls http://localhost:5000
+dotnet ef database update --context AuthDbContext
 ```
 
-In another terminal, register a development account:
+This creates the nine authentication tables and the `User`, `Admin`, and `Owner` role records. It does not create an administrator account. Public registration always assigns `User`.
+
+The application never runs migrations automatically during startup. Review migrations before applying them to an existing database. Business tables remain your application's responsibility.
+
+#### Read or apply the raw SQL
+
+[AuthModule.sql](AuthModule.sql) contains the SQL Server schema for the nine authentication tables, their keys/indexes/relationships, and the `User`, `Admin`, and `Owner` role records. It includes `__EFMigrationsHistory` so EF tooling recognizes the migration after the SQL is applied. It contains no seeded accounts, credentials, token values, or business data.
+
+You can use this script instead of `dotnet ef database update`. Create your target database first, then open the file in SQL Server Management Studio, select that database, review the script, and execute it. With `sqlcmd`, replace the example server/database as needed:
 
 ```powershell
-$registration = @{
-    fullName = "Example Developer"
+sqlcmd -S localhost -d BeautyParlour -E -C -b -i .\AuthModule.sql
+```
+
+`-E` uses Windows authentication, `-C` trusts the local development certificate, and `-b` stops the command on SQL errors. Use certificate validation when deploying. The file does not create or select a database.
+
+The script is [idempotent through EF migration history](https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying#idempotent-sql-scripts): migrations already recorded as applied are skipped. Existing tables without matching migration history are not automatically merged or upgraded. Keep the built-in auth context as the owner of these tables; a shared business context needs its own reviewed migration as described below.
+
+After changing the model and adding a migration, refresh the root SQL export:
+
+```powershell
+dotnet ef migrations script --idempotent --context AuthDbContext --output AuthModule.sql
+```
+
+This replaces the exported file. Preserve its introductory execution notes and `SET XACT_ABORT ON` setting when updating it. The C# migrations remain the source of truth; update the SQL export alongside them.
+
+### 4. Start the API
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --urls "http://localhost:5000"
+```
+
+`GET http://localhost:5000/health` checks whether the process is running. `GET /health/ready` also checks that the authentication session table can be read. Readiness returns 503 if the database or table is unavailable. There is no Swagger UI bundled; use the requests below, your API client, or a frontend.
+
+Use HTTPS in deployment. When hosting behind a reverse proxy, configure trusted forwarded headers before the auth pipeline so client IP limits use the correct address. Configure the deployment HTTPS port or terminate HTTPS at a correctly configured proxy.
+
+### 5. Test registration, access, refresh, and logout
+
+In a second PowerShell terminal:
+
+```powershell
+$baseUrl = "http://localhost:5000"
+$body = @{
+    fullName = "Test Developer"
     email = "developer@example.com"
     password = "ExamplePassword123!"
 } | ConvertTo-Json
 
-$auth = Invoke-RestMethod -Uri "http://localhost:5000/auth/custom/register" -Method Post -ContentType "application/json" -Body $registration
-Invoke-RestMethod -Uri "http://localhost:5000/me" -Headers @{ Authorization = "Bearer $($auth.accessToken)" }
-Invoke-RestMethod -Uri "http://localhost:5000/health/ready"
+$auth = Invoke-RestMethod "$baseUrl/auth/custom/register" -Method Post -ContentType "application/json" -Body $body
+$headers = @{ Authorization = "Bearer $($auth.accessToken)" }
+
+Invoke-WebRequest "$baseUrl/auth/custom/sessions/validate" -Headers $headers
+Invoke-RestMethod "$baseUrl/auth/custom/sessions" -Headers $headers
+
+$refreshBody = @{ refreshToken = $auth.refreshToken } | ConvertTo-Json
+$auth = Invoke-RestMethod "$baseUrl/auth/custom/refresh" -Method Post -ContentType "application/json" -Body $refreshBody
+
+$logoutBody = @{ refreshToken = $auth.refreshToken } | ConvertTo-Json
+Invoke-RestMethod "$baseUrl/auth/custom/logout" -Method Post -ContentType "application/json" -Body $logoutBody
 ```
 
-The registration response contains an access token, refresh token, expiry, and user.
-Send the access token as `Authorization: Bearer <token>`. Use an HTTP client to test
-the remaining endpoints below.
+Session validation returns HTTP 204 while authenticated. After logout, using an access token from that session must return 401. To log in again, send `email` and `password` to `POST /auth/custom/login`.
 
-### SQL Server instead of SQLite
+Always replace both stored tokens with the refresh response. Reusing a consumed refresh token revokes that device session. Clients should coordinate simultaneous refresh requests, including requests from multiple browser tabs.
 
-Install `Microsoft.EntityFrameworkCore.SqlServer` version 10.0.14 in your host,
-provide a SQL Server connection string, and replace the database provider setup:
+## Existing project integration
+
+This source targets .NET 10. An application with an existing identity system needs an explicit account/schema integration; copying this module does not merge existing users automatically.
+
+1. Copy the complete `AuthModule` folder into your API project, outside any other module of the same name. Do not copy the toolkit's `Program.cs` or `.csproj` over yours.
+2. Add the package references from `DevToolkit.Api.csproj` to your own project, aligning EF Core package versions with your application.
+3. Merge the configuration sections from the starter into your configuration and set your own secrets. In an existing project, run `dotnet user-secrets init` if it has no User Secrets configuration.
+4. Register the module in your existing `Program.cs` before `builder.Build()`:
 
 ```csharp
-builder.Services.AddDevToolkitAuth(builder.Configuration, database =>
-    database.UseSqlServer(
-        builder.Configuration.GetConnectionString("AuthDatabase"),
-        sql => sql.MigrationsAssembly(typeof(Program).Assembly.FullName)
+using DevToolkit.Auth.Constants;
+using DevToolkit.Auth.Extensions;
+using Microsoft.EntityFrameworkCore;
+
+builder.Services.AddDevToolkitAuth(
+    builder.Configuration,
+    database => database.UseSqlServer(
+        builder.Configuration.GetConnectionString("AuthDatabase")
     )
 );
 ```
 
-Generate migrations for the provider you actually deploy. The toolkit uses EF Core
-relational APIs and receives its provider configuration from the host.
-
-## Share your application's DbContext
-
-If you want auth and domain data in the same context, inherit from AuthDbContext:
+5. Merge these pipeline calls in order. Keep your existing exception handling, HTTPS, trusted-proxy handling, and CORS setup:
 
 ```csharp
-using DevToolkit.Auth.Data;
-using Microsoft.EntityFrameworkCore;
-
-namespace YourProject.Api.Data;
-
-public class YourProjectDbContext : AuthDbContext
-{
-    public YourProjectDbContext(DbContextOptions<YourProjectDbContext> options) : base(options)
-    {
-    }
-
-    // Add your application's DbSet properties here.
-    // If overriding OnModelCreating, call base.OnModelCreating(modelBuilder).
-}
+app.UseRouting();
+// Your named CORS policy goes here, if needed.
+app.UseDevToolkitAuth();
+app.MapControllers();
+app.MapDevToolkitHealthChecks();
 ```
 
-Register that context and use the generic overload:
+`UseDevToolkitAuth()` includes authentication, authorization, rate limiting, and the auth abuse limiter. If your application already calls `UseAuthentication()`, `UseAuthorization()`, or `UseRateLimiter()`, merge these stages rather than running them twice. A host with a more complex pipeline can call the individual stages explicitly; see `AuthApplicationBuilderExtensions.cs`.
+
+The module adds its named JWT scheme without replacing an existing authentication default. For an API that uses this JWT scheme as its main sign-in method, add `builder.Services.AddAuthentication(AuthSchemes.CustomJwt)`. In applications that keep another default, protect JWT endpoints with `[Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]` or an explicit policy. Login and registration remain anonymous even if your host has a fallback authorization policy.
+
+The module's controller filter handles known authentication errors. The starter also uses `GlobalExceptionMiddleware` for unexpected errors; existing applications can keep their own global exception handler instead.
+
+6. With the built-in auth context, review and apply the included migration using `dotnet ef database update --context AuthDbContext`. Your existing business DbContext can coexist in the same SQL Server database, but each context must own its tables and migrations. Do not map another incompatible user model onto the same table names.
+
+To keep authentication and business data in one DbContext instead, implement `IAuthDbContext` in your existing context, expose the nine auth DbSets, and call `modelBuilder.AddDevToolkitAuthModel()` from `OnModelCreating`. Register that existing context normally, then call:
 
 ```csharp
-builder.Services.AddDbContext<YourProjectDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("AuthDatabase"))
-);
-
-builder.Services.AddDevToolkitAuth<YourProjectDbContext>(builder.Configuration);
+builder.Services.AddDevToolkitAuth<BeautyParlourDbContext>(builder.Configuration);
 ```
 
-An existing DbContext can instead implement IAuthDbContext and call
-`modelBuilder.AddDevToolkitAuthModel()` from OnModelCreating. The generic overload
-registers the interface mapping to that same scoped context.
+`AddDevToolkitAuthModel()` is in `DevToolkit.Auth.Data`. Generate and review a migration for your own context; the provided `AuthDbContext` migration is not a migration for your business context. An alternative for a new shared context is to inherit from `AuthDbContext`, call its base `OnModelCreating`, and add business mappings afterwards.
 
-## Add your own profile after registration
+Keep the `DevToolkit.Auth` namespaces when copying. This lets the module compile without renaming every file. Source copying means you own and review later updates; it does not provide automatic upstream package updates.
 
-Implement `IUserRegisteredHook` in your host and register it as scoped. The module
-calls all registered hooks inside the registration transaction. Use the same host
-context when writing domain data. An exception rolls back the auth registration.
-Run external side effects such as welcome emails after a committed transaction,
-or through your application's transactional outbox.
+## Add your application's features
 
-## Endpoints
+The module creates an authentication account, not a BeautyParlour client, employee, appointment, or repair record. Store those models in your own feature folders and link them using `AppUserId`.
 
-All auth endpoints are under `/auth/custom`.
+If registration needs to create business data, implement `IUserRegisteredHook` and register it before `AddDevToolkitAuth`. The hook runs on password and Google account creation, within the auth transaction. Only operations using the same database context participate in that transaction; remote calls, email delivery, and a separate business DbContext do not roll back with it. Keep external side effects outside this hook or use your application's reliable event/outbox handling.
 
-| Method | Suffix | Authentication |
+Account self-service requires authentication, independently of your domain role names. The default role records are `User`, `Admin`, and `Owner`; add your own roles and authorization policies for application features. No public endpoint accepts a role to grant administrative access.
+
+## Email and Google configuration
+
+Set `Email:Host`, `Email:Port`, `Email:FromEmail`, `Email:FromName`, and any provider credentials. Store `Email:Password` in secrets. Port 587 uses required STARTTLS by default; use `Email:UseSsl=true` for implicit TLS, normally port 465. You can register your own `IEmailService` before the module to replace MailKit.
+
+Forgot-password requests return the same message whether an account exists or not. An email delivery failure is logged without the reset code and invalidates the generated OTP; it does not disclose account existence in the HTTP response. Check the configured provider's delivery when testing recovery.
+
+Set `GoogleAuth:ClientId` to your application's Google web client ID. The frontend sends the Google ID token as `{ "idToken": "..." }` to `POST /auth/custom/google`. The backend validates it. Existing-account linking by email is restricted to addresses for which Google is authoritative; third-party email accounts need additional account verification rather than automatic linking.
+
+The backend is frontend-independent. React or another client calls these endpoints; the shop's branded React pages are not bundled. Choose and review the browser token-storage strategy for your application. The current API returns bearer tokens in JSON and does not implement an HttpOnly-cookie flow or BFF.
+
+## API routes
+
+All routes below start with `/auth/custom`.
+
+| Method | Route | Authentication |
 | --- | --- | --- |
-| POST | /register | Public |
-| POST | /login | Public |
-| POST | /refresh | Refresh token in body |
-| POST | /logout | Refresh token in body |
-| POST | /google | Google ID token in body |
-| POST | /forgot-password/request | Public |
-| POST | /forgot-password/verify | Public |
-| POST | /forgot-password/reset | Reset token in body |
-| GET | /security-summary | Bearer token |
-| POST | /change-password | Bearer token |
-| POST | /set-password/google-reauth | Bearer token + recent Google ID token |
-| POST | /set-password/complete | Bearer token + setup token |
-| GET | /sessions | Bearer token |
-| POST | /sessions/logout-others | Bearer token + current refresh token |
-| POST | /sessions/logout-all | Bearer token |
-| POST | /sessions/{userSessionId}/revoke | Bearer token |
-| GET | /sessions/validate | Bearer token; returns 204 |
+| POST | `/register` | Anonymous |
+| POST | `/login` | Anonymous |
+| POST | `/refresh` | Refresh token in body |
+| POST | `/logout` | Refresh token in body |
+| POST | `/google` | Google ID token in body |
+| POST | `/forgot-password/request` | Anonymous |
+| POST | `/forgot-password/verify` | Email and OTP |
+| POST | `/forgot-password/reset` | Single-use reset token |
+| GET | `/security-summary` | JWT |
+| POST | `/change-password` | JWT and current password |
+| POST | `/set-password/google-reauth` | JWT and fresh linked Google ID token |
+| POST | `/set-password/complete` | JWT and single-use setup token |
+| GET | `/sessions` | JWT |
+| GET | `/sessions/validate` | JWT; returns 204 |
+| POST | `/sessions/logout-others` | JWT and `currentRefreshToken` |
+| POST | `/sessions/logout-all` | JWT |
+| POST | `/sessions/{userSessionId}/revoke` | JWT; another device belonging to this user |
 
-Expected input failures return 400, invalid credentials/sessions return 401,
-duplicate registration returns 409, and rate limits return 429. Unexpected
-infrastructure failures return a safe 500/503 problem response with a trace ID.
-The host can disable the included global exception handler when it supplies its own.
+Registration returns `accessToken`, `refreshToken`, `accessTokenExpiresAt`, and a `user` object with `appUserId`, name, email, optional phone/avatar, confirmation state, and roles. Invalid input returns 400; duplicate email returns 409; invalid or revoked credentials return 401; request limits return 429.
 
-## Backend middleware and health checks
+## Authentication support
 
-The single `UseDevToolkitAuth()` call now runs the following pipeline, in order:
+| Folder | Responsibility |
+| --- | --- |
+| Controllers / DTOs | Endpoints and validated request/response formats |
+| Entities / Data | Nine auth tables, mappings, and migrations |
+| Services / Repositories | Auth operations and database access |
+| Interfaces | Replaceable services, database contract, registration hook |
+| Services/Context | Current authenticated user/session and auth event logging |
+| Services/Email | Default MailKit email delivery |
+| Authorization / Constants / Enums | Role checks, named policies, routes, event types |
+| Models / Helpers | Device information, validation, request and response helpers |
+| Exceptions | Expected errors and the module controller's exception filter |
+| Middleware | Auth request abuse protection and optional global error handling |
+| HealthChecks | Read-only session-table availability and latency check |
+| Extensions / Settings | Registration, pipeline, endpoint setup, and configuration |
 
-1. Global exception handling (configurable).
-2. IP/account abuse checks before JWT authentication (configurable).
-3. JWT authentication.
-4. Optional-authentication checks for selected public endpoints.
-5. Authorization and named endpoint rate limits.
-6. Submission retry protection for selected endpoints.
+Passwords use BCrypt with work factor 12 and an eight-character minimum. Password input is limited to 72 UTF-8 bytes. Refresh/reset tokens are hashed in the database; OTPs use a keyed HMAC. Password reset and Google password setup use different token purposes. JWT requests validate the database account and device session so revocation and account disablement take effect on subsequent requests. Soft-deleted email addresses remain reserved.
 
-Call `UseRouting()` before it when assembling your own pipeline. Run trusted-proxy
-and CORS middleware before the toolkit. It should appear before endpoint execution.
-Configure response compression before the toolkit when using retry protection.
-Call the combined toolkit pipeline once; it already includes the backend middleware.
+Named limits are 5 auth attempts per five minutes, 3 OTP requests per ten minutes, 10 OTP verifications per five minutes, 120 authenticated reads per minute, and 10 other auth submissions per minute. The additional pre-auth limiter defaults to 60 requests per IP and 15 per supplied email per five minutes. Its values are configurable under `AuthModule`. Limits are held in one application process; multi-instance deployments need a shared limiting strategy.
 
-The `Backend` section shown above contains the settings. Set
-`EnableExceptionHandling: false` if the host already owns global error handling.
-The pre-auth limiter defaults to 60 requests per IP and 15 requests per normalized
-account per five minutes, with a 16 KiB JSON inspection limit. Account keys are
-hashed in memory. Malformed JSON still goes through MVC's normal input validation.
-These limits are additional to endpoint policies; tune both for your workload.
+`/health` is public liveness; `/health/ready` is public auth readiness; `/health/details` requires the module's Admin/Owner policy. A successful read check does not establish database write access. No admin account is seeded, and detailed health output does not include exception messages.
 
-For public forms, explicitly select the desired behavior:
+This module does not include Microsoft login, login OTP/MFA, a complete email-confirmation flow, refresh-token cookies, shop business features, or generic submission idempotency. Add features deliberately after verifying the existing flows.
 
-```csharp
-using DevToolkit.Infrastructure.RateLimiting;
-using DevToolkit.Infrastructure.Extensions;
-
-app.MapPost("/intake", (SubmissionDto request) => Results.Ok(request))
-    .WithOptionalAuthentication()
-    .WithSubmissionIdempotency()
-    .RequireRateLimiting(RateLimitPolicies.FormSubmit);
-```
-
-`SubmissionDto` is your host's request type. Guests are accepted, but an invalid
-supplied authorization header returns 401. Controller actions can use
-`[OptionalAuthentication]` and `[SubmissionIdempotency]` from
-`DevToolkit.Infrastructure.Metadata`. Existing applications can instead configure
-`Backend:OptionalAuthenticationPaths` (prefixes) and `Backend:IdempotencyPaths`
-(exact paths). There are no business-specific form or chat routes built into the module.
-
-Retry protection applies to JSON POST requests carrying a UUID `Idempotency-Key`.
-It fingerprints the body, query, and content type and scopes the key to the endpoint
-and authenticated user (or guest IP). Identical retries replay the original response;
-different details return 409. Authentication endpoints cannot use it.
-
-The default store has 1,000 entries, a ten-minute retention period, a 32 KiB request
-limit, and a 64 KiB response limit. In-flight entries remain pinned. Full storage
-returns 503. If execution fails ambiguously, or a response contains cookies or cannot
-be safely buffered/replayed, the same key returns 409 instead of rerunning the handler.
-Keep selected handlers short, JSON-based, and free of streaming responses.
-
-This is bounded, process-local retry protection. Restarting the application loses
-its entries, and multiple instances do not share them. It does not provide a durable
-exactly-once guarantee. Important business writes need a database-backed idempotency
-record committed in the same transaction as the write. Neither this store nor the
-rate limiter substitutes for deployment-level traffic controls.
-
-`MapDevToolkitHealthChecks()` follows the same endpoint split as the reference system:
-
-| Endpoint | Access | Behavior |
-| --- | --- | --- |
-| /health | Public | Liveness; does not query the database |
-| /health/ready | Public | Core readiness; returns 503 when a dependency is unhealthy |
-| /health/details | Admin/Owner | JSON diagnostics, durations, descriptions, and check data |
-
-The session-store probe checks that the table is readable, reports latency, and
-degrades when it is slow. It does not claim to verify writes. Its timeout and slow
-threshold are configurable. Health responses are not cached; public probes do not
-include exception messages or diagnostic data. The detailed endpoint is authorization
-protected and should stay private to operations staff.
-
-Register host-specific checks with `builder.Services.AddHealthChecks()`. Add the
-`ready` tag to core checks. Add `external` for optional dependencies that should not
-take core readiness offline. This version includes the session-store probe;
-application-specific storage, AI providers, disk, and memory thresholds remain host
-decisions. The original project's AI provider and upload paths are not dependencies.
-
-## Security and behavior
-
-- Passwords use BCrypt with work factor 12 and an explicit 72 UTF-8 byte limit.
-- Refresh tokens are random, stored only as SHA-256 hashes, and consumed atomically.
-  Reuse revokes that device session. Clients must coordinate concurrent refreshes
-  and must not blindly retry a refresh request after an ambiguous network failure.
-- Every authenticated request checks the session, account status, and absolute
-  session lifetime in the database. This intentionally adds a database read.
-- Five failed password attempts lock the account for 15 minutes.
-- OTPs use HMAC-SHA256, attempt limits, constant-time comparison, and expiry.
-  Reset/setup tokens are hashed, single use, and restricted to their purpose.
-- Forgot-password requests use the same success response for unknown, inactive,
-  and Google-only accounts. Email delivery failures are logged without message contents.
-- Google tokens are validated by Google's library for the configured client.
-  Existing accounts are linked by email only for authoritative Gmail/Workspace
-  claims. Other third-party email identities require a separate linking flow in
-  the host. An unverified preregistration loses its old password and sessions
-  when the authoritative Google owner first signs in.
-- Email/password registration does not require verified mailbox ownership.
-  Add an email-verification workflow before granting email-dependent privileges.
-- Auth self-service endpoints require authentication, independent of domain roles.
-  Use AppPolicies.AdminOnly for admin endpoints and define extra host policies
-  for your own roles. Never accept an admin role from a registration request.
-- The included rate limiter is process-local. Multiple server instances need an
-  additional shared limiter or a gateway policy.
-
-## Verify in your consuming project
-
-Create and maintain your separate test application or test repository against a
-fresh clone of this toolkit. Verify registration/login, invalid credentials,
-refresh rotation and reuse, logout/revocation, password recovery, Google sign-in
-when configured, rate limits, and health endpoint permissions.
-
-Run database migrations and test your actual database provider, SMTP provider,
-Google client configuration, and deployment settings. Readiness should fail when
-the session store is unavailable while liveness remains available.
-
-The toolkit repository contains the library and this guide. Verification projects
-can live in your own workspace or separate repository.
-
-No open-source license has been selected for this repository yet.
+Before deploying, verify the real SQL Server migration, email delivery, Google configuration, frontend session behavior, and hosting configuration. `dotnet build` is a compile check, not proof that external integrations work. If you publish a new application based on this repository, connect its Git remote to your own application repository before pushing application-specific changes.
