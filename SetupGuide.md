@@ -588,36 +588,119 @@ You can stop the basic setup here once register, login, token validation, refres
 
 ## Optional email recovery and Google sign-in
 
-These are separate integrations. A Google **App Password** is an SMTP credential for email delivery, not a Google OAuth client ID or ID token.
+Complete the basic API setup first. Add either integration below when your application needs it.
 
-### Email recovery
+| You want to | Configure |
+| --- | --- |
+| Let users sign in with their Google account | Google consent settings, a web OAuth Client ID, and a frontend Google sign-in button |
+| Send password-reset OTP emails using Gmail | A Gmail App Password and the backend's email settings |
 
-For a Gmail SMTP account, these are example values; other providers may differ:
+### A. Set up Google sign-in
+
+#### 1. Create a Google Cloud project and consent configuration
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project, such as `BeautyParlour`.
+2. Open **Google Auth Platform → Branding**. If prompted, choose **Get started**.
+3. Enter your application's name, support email, and developer contact email.
+4. Choose **External** for a public application serving Google accounts outside your organization. **Internal** is for an eligible Google Workspace organization.
+5. Finish the consent setup. Under **Audience → Test users**, add your own Google email and the accounts you will use while testing an External app.
+6. Review **Data Access**. For basic sign-in, use the standard `openid`, `email`, and `profile` identity scopes; Gmail or Drive access is unnecessary.
+
+Before launching your application, review its Branding and Audience settings and any verification requirements shown by Google. Making the DevToolkit GitHub repository public does not publish your application's Google consent configuration. [Google's consent setup guide](https://developers.google.com/workspace/guides/configure-oauth-consent)
+
+#### 2. Create the web OAuth Client ID
+
+1. Open **Google Auth Platform → Clients → Create client**.
+2. Select **Web application** and give it a name, such as `BeautyParlour Web`.
+3. Under **Authorized JavaScript origins**, add your frontend's origin. For local React/Vite testing, add both `http://localhost` and `http://localhost:5173`. An Angular app might use `http://localhost:4200` instead; add the port your frontend actually uses.
+4. Origins contain the scheme, host, and optional port. Do not add a page path such as `/login` here.
+5. This guide uses a JavaScript sign-in callback. **Authorized redirect URIs** are needed if you choose Google's redirect mode instead.
+6. Create the client and copy its **Client ID**, ending in `.apps.googleusercontent.com`.
+
+Use your frontend's origin here; its port can differ from the backend's. Add your deployed frontend's HTTPS origin when you host the application. [Google's web client setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+
+#### 3. Configure the backend and frontend
+
+From your API folder, replace the placeholder and run:
+
+```powershell
+dotnet user-secrets set "GoogleAuth:ClientId" "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+```
+
+Use that **same Client ID** in your frontend's Google Identity Services configuration. The Client ID identifies the app and can appear in frontend configuration. This toolkit's ID-token flow does not require a Client Secret.
+
+Add the frontend origin to the backend's `Cors:AllowedOrigins` as described in [Connect your frontend](#connect-your-frontend). Keep the Development setting from the main guide, then restart the API with `dotnet run`.
+
+#### 4. Connect the sign-in button and test
+
+Configure a Google Identity Services button in your React, Angular, TypeScript, or other frontend. In its JavaScript callback, Google's `response.credential` is the **Google ID token**. Send that value to the backend as JSON. [Google's credential-response documentation](https://developers.google.com/identity/gsi/web/guides/display-google-one-tap#credential_response)
+
+```http
+POST http://localhost:5148/auth/custom/google
+Content-Type: application/json
+```
+
+```json
+{
+  "idToken": "PASTE_THE_GOOGLE_ID_TOKEN_FROM_THE_FRONTEND_CALLBACK"
+}
+```
+
+Use your API's actual port. For a manual Thunder Client check, use **Auth → None** and paste a fresh ID token from your configured frontend. Thunder Client does not generate Google ID tokens for you. The repository supplies the backend endpoint; you add the frontend button.
+
+Expected: **200 OK** with DevToolkit's `accessToken`, `refreshToken`, and account details. Use the returned **DevToolkit access token** for `/auth/custom/sessions/validate`. The Google ID token is the input to Google sign-in, not the Bearer token for this API's protected routes.
+
+### B. Set up Gmail App Passwords for OTP email
+
+This configures the backend to send recovery emails. Users can still sign in with email/password without Google sign-in being configured.
+
+#### 1. Generate the App Password
+
+1. Sign in to the Google account whose Gmail address will send the emails.
+2. Open [Google Account security settings](https://myaccount.google.com/security) and enable **2-Step Verification** if it is not already enabled.
+3. Open [App Passwords](https://myaccount.google.com/apppasswords). Google may ask you to sign in again.
+4. If prompted for an app name, use a recognizable name such as `BeautyParlour Mail`, then create the password.
+5. Copy the generated App Password. Use this value for `Email:Password`, rather than your normal Google account password.
+
+If App Passwords is unavailable, check Google's eligibility notes: organization policies, Advanced Protection, or security-key-only 2-Step Verification can prevent the option from appearing. Changing your Google account password also revokes existing App Passwords. [Google's App Password guide](https://support.google.com/accounts/answer/185833?hl=en)
+
+#### 2. Save Gmail settings in User Secrets
+
+Replace `YOUR_GMAIL_ADDRESS` and `YOUR_GOOGLE_APP_PASSWORD`, then run from your API folder:
 
 ```powershell
 dotnet user-secrets set "Email:Host" "smtp.gmail.com"
 dotnet user-secrets set "Email:Port" "587"
-dotnet user-secrets set "Email:Username" "YOUR_EMAIL_ADDRESS"
-dotnet user-secrets set "Email:Password" "YOUR_PROVIDER_APP_PASSWORD"
-dotnet user-secrets set "Email:FromEmail" "YOUR_EMAIL_ADDRESS"
+dotnet user-secrets set "Email:Username" "YOUR_GMAIL_ADDRESS"
+dotnet user-secrets set "Email:Password" "YOUR_GOOGLE_APP_PASSWORD"
+dotnet user-secrets set "Email:FromEmail" "YOUR_GMAIL_ADDRESS"
 dotnet user-secrets set "Email:FromName" "YourApp"
+dotnet user-secrets set "Email:UseSsl" "false"
 ```
 
-Replace the placeholders with provider account values. Port 587 uses required STARTTLS by default. Implicit TLS, normally port 465, uses `Email:UseSsl=true`. Another delivery service can implement `IEmailService`.
+Use the same Gmail address for `Username` and `FromEmail` in this basic example. Port **587** uses **STARTTLS** in this toolkit, so `UseSsl=false` still uses an encrypted connection. `UseSsl=true` selects implicit TLS, normally on port 465. [Google's Gmail SMTP settings](https://support.google.com/mail/answer/7104828?hl=en)
 
-With a registered password account whose inbox you control:
+Restart the API with `dotnet run` after saving the settings. Other email providers can use their own supported SMTP configuration or replace `IEmailService`.
 
-1. Request recovery at `POST /auth/custom/forgot-password/request` with `email`.
-2. Read the delivered OTP from the inbox. A neutral 200 response alone does not prove delivery.
-3. Verify it at `POST /auth/custom/forgot-password/verify` with `email` and six-digit `code`.
-4. Reset at `POST /auth/custom/forgot-password/reset` with the returned `resetToken` and `newPassword`.
-5. Check the old password fails, the new one succeeds, and old sessions are rejected.
+#### 3. Test delivery and password recovery
 
-### Google sign-in
+Use a registered email/password account whose inbox you can open. The Gmail sender account and the recipient account do not have to be the same.
 
-`GoogleAuth:ClientId` identifies the application's Google web OAuth client. The frontend's configured Google sign-in produces an ID token; the backend receives `{ "idToken": "..." }` at `POST /auth/custom/google` and validates it.
+1. Send `POST /auth/custom/forgot-password/request` with `{ "email": "YOUR_REGISTERED_EMAIL" }`.
+2. Open the recipient's inbox and check Spam/Junk too. A neutral **200** response by itself does not prove an email was delivered.
+3. Send `POST /auth/custom/forgot-password/verify` with the same `email` and the received six-digit `code`.
+4. Send `POST /auth/custom/forgot-password/reset` with the returned `resetToken` and a `newPassword`.
+5. Confirm the old password fails, the new password works, and old sessions are rejected.
 
-The frontend origin and Google web client configuration must match the application. This repository has no Google login UI or helper that manufactures Google ID tokens. Test with a real configured frontend/client. A Gmail App Password cannot replace the ID token.
+### Common Google setup problems
+
+| Problem | Check |
+| --- | --- |
+| Google reports an origin mismatch | Match the actual frontend scheme, hostname, and port in Authorized JavaScript origins; `localhost` and `127.0.0.1` are different hosts |
+| A test account cannot access the OAuth app | Check Audience, the app's testing status, and its test-user list |
+| Backend rejects the Google token | Use a fresh Google ID token and the same web Client ID in frontend and `GoogleAuth:ClientId` |
+| Gmail authentication fails | Check the full Gmail username, App Password, 2-Step Verification eligibility, and port/TLS settings |
+| Gmail stopped working after a Google password change | Generate a new App Password and update `Email:Password` |
 
 ## Optional: share a database context with business features
 
