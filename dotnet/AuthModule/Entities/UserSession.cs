@@ -1,4 +1,4 @@
-namespace AuthModule.Entities;
+namespace DevToolkit.Auth.Entities;
 
 public partial class UserSession
 {

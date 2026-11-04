@@ -1,4 +1,4 @@
-namespace TanishElectronics.Api.DTOs.Auth;
+namespace DevToolkit.Auth.DTOs.Auth;
 
 public class SecuritySummaryResponseDto
 {

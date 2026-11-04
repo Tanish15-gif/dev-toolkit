@@ -1,16 +1,20 @@
 using Microsoft.EntityFrameworkCore;
-using TanishElectronics.Api.Data;
-using TanishElectronics.Api.Entities;
-using TanishElectronics.Api.Interfaces.Repositories.Auth;
+using DevToolkit.Auth.Interfaces;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Interfaces.Repositories;
+using Microsoft.Extensions.Options;
+using DevToolkit.Auth.Settings;
 
-namespace TanishElectronics.Api.Repositories.Auth;
+namespace DevToolkit.Auth.Repositories;
 
 public class SessionRepository : ISessionRepository
 {
-    private readonly TanishElectronicsDbContext _dbContext;
-    public SessionRepository(TanishElectronicsDbContext dbContext)
+    private readonly IAuthDbContext _dbContext;
+    private readonly JwtSettings _settings;
+    public SessionRepository(IAuthDbContext dbContext, IOptions<JwtSettings> options)
     {
         _dbContext = dbContext;
+        _settings = options.Value;
     }
     public async Task<int> GetActiveSessionCountAsync(int appUserId)
     {
@@ -20,7 +24,8 @@ public class SessionRepository : ISessionRepository
             .CountAsync(token =>
                 token.AppUserId == appUserId &&
                 token.RevokedAt == null &&
-                token.ExpiresAt > now
+                token.ExpiresAt > now && token.UserSession != null && token.UserSession.RevokedAt == null &&
+                token.UserSession.CreatedAt > now.AddDays(-_settings.AbsoluteSessionDays)
             );
     }
 
@@ -121,10 +126,12 @@ public class SessionRepository : ISessionRepository
 
     public async Task<int> GetActiveUserSessionCountAsync(int appUserId)
     {
+        var now = DateTime.UtcNow;
         return await _dbContext.UserSessions
             .CountAsync(session =>
                 session.AppUserId == appUserId &&
-                session.RevokedAt == null
+                session.RevokedAt == null && session.CreatedAt > now.AddDays(-_settings.AbsoluteSessionDays) &&
+                session.RefreshTokens.Any(token => token.RevokedAt == null && token.ExpiresAt > now)
             );
     }
 
@@ -136,6 +143,7 @@ public class SessionRepository : ISessionRepository
             .Where(session =>
                 session.AppUserId == appUserId &&
                 session.RevokedAt == null &&
+                session.CreatedAt > now.AddDays(-_settings.AbsoluteSessionDays) &&
                 session.RefreshTokens.Any(token =>
                     token.RevokedAt == null &&
                     token.ExpiresAt > now
@@ -190,13 +198,22 @@ public class SessionRepository : ISessionRepository
             throw;
         }
     }
+
     public async Task<bool> IsSessionActiveAsync(Guid sessionId, int appUserId, CancellationToken cancellationToken = default)
     {
-        return await _dbContext.UserSessions.AsNoTracking()
-            .AnyAsync(s =>
-                s.UserSessionId == sessionId &&
-                s.AppUserId == appUserId &&
-                s.RevokedAt == null, cancellationToken
+        var now = DateTime.UtcNow;
+        var earliestCreatedAt = now.AddDays(-_settings.AbsoluteSessionDays);
+
+        return await _dbContext.UserSessions
+            .AsNoTracking()
+            .AnyAsync(session =>
+                session.UserSessionId == sessionId &&
+                session.AppUserId == appUserId &&
+                session.RevokedAt == null &&
+                session.CreatedAt > earliestCreatedAt &&
+                session.AppUser.IsActive &&
+                session.AppUser.DeletedAt == null,
+                cancellationToken
             );
     }
 }

@@ -1,41 +1,56 @@
-using AuthModule.Interfaces;
+using System.Diagnostics;
+using DevToolkit.Auth.Interfaces;
+using DevToolkit.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 namespace DevToolkit.Infrastructure.HealthChecks;
 
-/// <summary>
-/// Checks that the UserSessions table is reachable and queryable.
-/// Register: .AddCheck&lt;SessionStoreHealthCheck&gt;("session-store", tags: new[] { "ready", "database" })
-/// </summary>
 public class SessionStoreHealthCheck : IHealthCheck
 {
-    private readonly IAuthDbContext _db;
+    private readonly IAuthDbContext _database;
+    private readonly BackendSettings _settings;
 
-    public SessionStoreHealthCheck(IAuthDbContext db)
+    public SessionStoreHealthCheck
+    (
+        IAuthDbContext database,
+        IOptions<BackendSettings> options
+    )
     {
-        _db = db;
+        _database = database;
+        _settings = options.Value;
     }
 
-    public async Task<HealthCheckResult> CheckHealthAsync(
+    public async Task<HealthCheckResult> CheckHealthAsync
+    (
         HealthCheckContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default
+    )
     {
+        var stopwatch = Stopwatch.StartNew();
+
         try
         {
-            // Lightweight existence probe — no actual data read needed
-            var canConnect = await _db.UserSessions
-                .AsNoTracking()
-                .AnyAsync(cancellationToken);
+            await _database.UserSessions.AsNoTracking().AnyAsync(cancellationToken);
+            stopwatch.Stop();
 
-            return HealthCheckResult.Healthy("Session store is reachable.");
+            var data = new Dictionary<string, object>
+            {
+                ["latencyMs"] = stopwatch.ElapsedMilliseconds
+            };
+
+            return stopwatch.ElapsedMilliseconds > _settings.SessionStoreSlowMilliseconds
+                ? HealthCheckResult.Degraded("Session store is readable but slow.", data: data)
+                : HealthCheckResult.Healthy("Session store is reachable and readable.", data);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return HealthCheckResult.Unhealthy(
-                "Session store health check failed.",
-                exception: ex
-            );
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return HealthCheckResult.Unhealthy("Session store is unavailable.", exception);
         }
     }
 }

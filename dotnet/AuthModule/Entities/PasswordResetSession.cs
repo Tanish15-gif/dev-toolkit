@@ -1,10 +1,12 @@
-namespace AuthModule.Entities;
+namespace DevToolkit.Auth.Entities;
 
 public partial class PasswordResetSession
 {
     public int PasswordResetSessionId { get; set; }
 
     public int AppUserId { get; set; }
+
+    public string Purpose { get; set; } = "password-reset";
 
     public string TokenHash { get; set; } = null!;
 

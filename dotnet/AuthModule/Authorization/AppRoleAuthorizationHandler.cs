@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
-using AuthModule.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Repositories;
 
-namespace AuthModule.Authorization;
+namespace DevToolkit.Auth.Authorization;
 
 public class AppRoleAuthorizationHandler : AuthorizationHandler<AppRoleRequirement>
 {

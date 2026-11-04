@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
-using AuthModule.Interfaces.Services;
 using Microsoft.AspNetCore.WebUtilities;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class PasswordResetTokenService : IPasswordResetTokenService
 {

@@ -1,6 +1,6 @@
-using AuthModule.Enums.Auth;
+using DevToolkit.Auth.Enums;
 
-namespace AuthModule.Interfaces.Services;
+namespace DevToolkit.Auth.Interfaces.Services;
 
 public interface IAuthEventLogger
 {

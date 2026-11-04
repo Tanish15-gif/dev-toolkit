@@ -1,14 +1,15 @@
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Enums.Auth;
-using AuthModule.Exceptions;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
-using AuthModule.Services.Helpers;
-using AuthModule.Settings;
+using DevToolkit.Infrastructure.Email;
 using Microsoft.Extensions.Options;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Enums;
+using DevToolkit.Auth.Exceptions;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Services.Helpers;
+using DevToolkit.Auth.Settings;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class PasswordRecoveryService : IPasswordRecoveryService
 {
@@ -19,6 +20,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
     private readonly OtpSettings _otpSettings;
     private readonly IEmailService _emailService;
     private readonly IPasswordResetTokenService _passwordResetTokenService;
+    private readonly ILogger<PasswordRecoveryService> _logger;
     private readonly AppInfoSettings _appInfo;
 
     public PasswordRecoveryService
@@ -30,6 +32,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
         IOptions<OtpSettings> options,
         IEmailService emailService,
         IPasswordResetTokenService passwordResetTokenService,
+        ILogger<PasswordRecoveryService> logger,
         IOptions<AppInfoSettings> appInfoOptions
     )
     {
@@ -40,20 +43,19 @@ public class PasswordRecoveryService : IPasswordRecoveryService
         _otpSettings = options.Value;
         _emailService = emailService;
         _passwordResetTokenService = passwordResetTokenService;
+        _logger = logger;
         _appInfo = appInfoOptions.Value;
     }
-
     public async Task RequestForgotPasswordOtpAsync(ForgotPasswordRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Email)) throw new InvalidOperationException("Email is required");
+        if (string.IsNullOrWhiteSpace(dto.Email)) throw new BadRequestException("Email is required");
 
         var normalizedEmail = AuthHelpers.NormalizeEmail(dto.Email);
 
         var user = await _authRepository.GetUserByNormalizedEmailAsync(normalizedEmail);
 
-        if (user == null || user.DeletedAt != null) throw new KeyNotFoundException("No account is registered with this email.");
-        if (!user.IsActive) throw new InvalidOperationException("This account is currently inactive");
-        if (string.IsNullOrWhiteSpace(user.PasswordHash)) throw new InvalidOperationException("This account uses Google sign-in. Please sign in with Google.");
+        if (user == null || user.DeletedAt != null || !user.IsActive ||
+            string.IsNullOrWhiteSpace(user.PasswordHash)) return;
 
         var purpose = OtpPurpose.ForgotPassword.ToString();
 
@@ -90,7 +92,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
         try
         {
             var safeName = System.Net.WebUtility.HtmlEncode(user.FullName);
-            var appName = _appInfo.Name;
+            var safeAppName = System.Net.WebUtility.HtmlEncode(_appInfo.Name);
 
             var htmlBody = $"""
             <!DOCTYPE html>
@@ -99,7 +101,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
                 <div style="max-width:560px;margin:40px auto;padding:24px;">
                     <div style="background:#fffdf7;border:1px solid #d8cdb6;border-radius:24px;padding:32px;">
                         <p style="margin:0;color:#8a6624;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">
-                            {appName}
+                            {safeAppName}
                         </p>
 
                         <h1 style="margin:20px 0 10px;font-size:28px;">
@@ -128,7 +130,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
             """;
 
             var textBody = $"""
-                {appName} password reset
+                {_appInfo.Name} password reset
 
                 Hello {user.FullName},
 
@@ -141,27 +143,28 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
             await _emailService.SendAsync(
                 user.Email,
-                $"Your {appName} password reset code",
+                $"Your {_appInfo.Name} password reset code",
                 htmlBody,
-                textBody)
-            ;
+                textBody
+            );
         }
-        catch
+        catch (Exception ex)
         {
             await _authRepository.InvalidateActiveOtpsAsync(normalizedEmail, purpose);
-            throw;
+            // Do not log SMTP exception details: a provider may include message contents.
+            _logger.LogWarning("Password reset email delivery failed ({FailureType}).", ex.GetType().Name);
         }
     }
 
     public async Task<VerifyForgotPasswordOtpResponseDto> VerifyForgotPasswordOtpAsync(VerifyForgotPasswordOtpRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Email)) throw new InvalidOperationException("Email is required.");
+        if (string.IsNullOrWhiteSpace(dto.Email)) throw new BadRequestException("Email is required.");
 
         var code = dto.Code?.Trim() ?? string.Empty;
 
         if (code.Length != 6 || !code.All(char.IsDigit))
         {
-            throw new InvalidOperationException("Invalid or expired verification code.");
+            throw new BadRequestException("Invalid or expired verification code.");
         }
 
         var normalizedEmail = AuthHelpers.NormalizeEmail(dto.Email);
@@ -179,7 +182,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
             user.DeletedAt != null
         )
         {
-            throw new InvalidOperationException(
+            throw new BadRequestException(
                 "Invalid or expired verification code."
             );
         }
@@ -194,7 +197,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
         if (otp == null)
         {
-            throw new InvalidOperationException(
+            throw new BadRequestException(
                 "Invalid or expired verification code."
             );
         }
@@ -210,7 +213,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
             await _authRepository.UpdateOtpAsync(otp);
 
-            throw new InvalidOperationException(
+            throw new BadRequestException(
                 "Invalid or expired verification code."
             );
         }
@@ -225,20 +228,9 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
         if (!valid)
         {
-            otp.AttemptCount += 1;
+            await _authRepository.RecordFailedOtpAttemptAsync(otp.OtpCodeId, _otpSettings.MaxAttempts);
 
-            if
-            (
-                otp.AttemptCount >=
-                _otpSettings.MaxAttempts
-            )
-            {
-                otp.ConsumedAt = now;
-            }
-
-            await _authRepository.UpdateOtpAsync(otp);
-
-            throw new InvalidOperationException("Invalid or expired verification code.");
+            throw new BadRequestException("Invalid or expired verification code.");
         }
 
         var plainResetToken = _passwordResetTokenService.GenerateToken();
@@ -257,7 +249,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
             CreatedByIp = _authContextAccessor.GetClientIpAddress()
         };
 
-        await _authRepository.ConsumeOtpAndCreateResetSessionAsync(otp, resetSession);
+        await _authRepository.ConsumeOtpAndCreateResetSessionAsync(otp, resetSession, _otpSettings.MaxAttempts);
 
         return new VerifyForgotPasswordOtpResponseDto
         {
@@ -269,11 +261,11 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
     public async Task ResetPasswordAsync(ResetPasswordRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.ResetToken)) throw new InvalidOperationException("Invalid or expired reset session.");
+        if (string.IsNullOrWhiteSpace(dto.ResetToken)) throw new BadRequestException("Invalid or expired reset session.");
 
-        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new InvalidOperationException("New password is required.");
+        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new BadRequestException("New password is required.");
 
-        if (dto.NewPassword.Length < 8) throw new InvalidOperationException("Password must be at least 8 characters.");
+        if (dto.NewPassword.Length < 8) throw new BadRequestException("Password must be at least 8 characters.");
 
         var tokenHash = _passwordResetTokenService.HashToken(dto.ResetToken);
 
@@ -285,11 +277,12 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
         if (
             resetSession == null ||
+            resetSession.Purpose != "password-reset" ||
             resetSession.ConsumedAt != null ||
             resetSession.ExpiresAt <= DateTime.UtcNow
         )
         {
-            throw new InvalidOperationException(
+            throw new BadRequestException(
                 "Invalid or expired reset session."
             );
         }
@@ -302,7 +295,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
             user.DeletedAt != null
         )
         {
-            throw new InvalidOperationException(
+            throw new BadRequestException(
                 "Invalid or expired reset session."
             );
         }
@@ -323,14 +316,13 @@ public class PasswordRecoveryService : IPasswordRecoveryService
             _authContextAccessor.GetClientIpAddress()
         );
     }
-
     public async Task ChangePasswordAsync(ChangePasswordRequestDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.CurrentPassword)) throw new BadRequestException("Current password is required.");
 
-        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new InvalidOperationException("New password is required.");
+        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new BadRequestException("New password is required.");
 
-        if (dto.NewPassword.Length < 8) throw new InvalidOperationException("New password must be at least 8 characters.");
+        if (dto.NewPassword.Length < 8) throw new BadRequestException("New password must be at least 8 characters.");
 
         var appUserId = _authContextAccessor.GetAuthenticatedUserId();
 
@@ -338,7 +330,7 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
         if (user == null || !user.IsActive || user.DeletedAt != null) throw new UnauthorizedAccessException("Account not found");
 
-        if (string.IsNullOrWhiteSpace(user.PasswordHash)) throw new InvalidOperationException("This account does not have a password yet.");
+        if (string.IsNullOrWhiteSpace(user.PasswordHash)) throw new BadRequestException("This account does not have a password yet.");
 
         var now = DateTime.UtcNow;
 
@@ -362,11 +354,11 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
     public async Task CompleteSetPasswordAsync(CompleteSetPasswordRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.SetupToken)) throw new InvalidOperationException("Invalid or expired setup session.");
+        if (string.IsNullOrWhiteSpace(dto.SetupToken)) throw new BadRequestException("Invalid or expired setup session.");
 
-        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new InvalidOperationException("New password is required.");
+        if (string.IsNullOrWhiteSpace(dto.NewPassword)) throw new BadRequestException("New password is required.");
 
-        if (dto.NewPassword.Length < 8) throw new InvalidOperationException("Password must be at least 8 characters.");
+        if (dto.NewPassword.Length < 8) throw new BadRequestException("Password must be at least 8 characters.");
 
         var appUserId = _authContextAccessor.GetAuthenticatedUserId();
 
@@ -376,19 +368,19 @@ public class PasswordRecoveryService : IPasswordRecoveryService
 
         if (
             setUpSession == null ||
+            setUpSession.Purpose != "password-setup" ||
             setUpSession.AppUserId != appUserId ||
             setUpSession.ConsumedAt != null ||
             setUpSession.ExpiresAt <= DateTime.UtcNow
         )
         {
-            throw new InvalidOperationException("Invalid or expired setup session.");
+            throw new BadRequestException("Invalid or expired setup session.");
         }
-
         var user = setUpSession.AppUser;
 
         if (user == null || !user.IsActive || user.DeletedAt != null) throw new UnauthorizedAccessException("Account was not found.");
 
-        if (!string.IsNullOrWhiteSpace(user.PasswordHash)) throw new InvalidOperationException("This account already has a password.");
+        if (!string.IsNullOrWhiteSpace(user.PasswordHash)) throw new BadRequestException("This account already has a password.");
 
         var now = DateTime.UtcNow;
 

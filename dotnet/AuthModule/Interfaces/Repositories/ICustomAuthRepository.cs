@@ -1,6 +1,6 @@
-using AuthModule.Entities;
+using DevToolkit.Auth.Entities;
 
-namespace AuthModule.Interfaces.Repositories;
+namespace DevToolkit.Auth.Interfaces.Repositories;
 
 /// <summary>
 /// Composite repository interface used by auth services.

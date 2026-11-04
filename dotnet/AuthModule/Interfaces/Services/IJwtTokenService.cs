@@ -1,7 +1,7 @@
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
 
-namespace AuthModule.Interfaces.Services;
+namespace DevToolkit.Auth.Interfaces.Services;
 
 public interface IJwtTokenService
 {

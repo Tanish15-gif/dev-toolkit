@@ -1,6 +1,6 @@
-using AuthModule.DTOs.Auth;
+using DevToolkit.Auth.DTOs.Auth;
 
-namespace AuthModule.Interfaces.Services;
+namespace DevToolkit.Auth.Interfaces.Services;
 
 public interface IGoogleAuthService
 {

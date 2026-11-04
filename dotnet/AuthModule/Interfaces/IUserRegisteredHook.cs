@@ -1,6 +1,6 @@
-using AuthModule.Entities;
+using DevToolkit.Auth.Entities;
 
-namespace AuthModule.Interfaces;
+namespace DevToolkit.Auth.Interfaces;
 
 /// <summary>
 /// Optional hook called after a new AppUser is created via credential or Google registration.

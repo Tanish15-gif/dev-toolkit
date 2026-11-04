@@ -1,6 +1,6 @@
-using AuthModule.Entities;
+using DevToolkit.Auth.Entities;
 
-namespace AuthModule.Interfaces.Repositories;
+namespace DevToolkit.Auth.Interfaces.Repositories;
 
 public interface ICredentialAuthRepository
 {
@@ -8,6 +8,8 @@ public interface ICredentialAuthRepository
     Task<bool> EmailExistsAsync(string normalizedEmail);
     Task<AppUser> CreateUserAsync(AppUser user);
     Task UpdateUserAsync(AppUser user);
+    Task<int> RecordFailedLoginAttemptAsync(int appUserId);
+    Task<bool> CompletePasswordLoginAsync(int appUserId, string expectedPasswordHash);
     Task AssignRoleAsync(int appUserId, string roleName);
     Task<List<string>> GetUserRolesAsync(int appUserId);
     Task AddAuthEventAsync(UserAuthEvent authEvent);

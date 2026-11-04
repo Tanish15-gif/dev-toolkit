@@ -2,24 +2,22 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Interfaces.Services;
-using AuthModule.Settings;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Settings;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class JwtTokenService : IJwtTokenService
 {
     private readonly JwtSettings _jwtSettings;
-
     public JwtTokenService(IOptions<JwtSettings> jwtOptions)
     {
         _jwtSettings = jwtOptions.Value;
     }
-
     public AuthResponseDto GenerateAuthResponse(AppUser user, List<string> roles, string refreshToken, Guid userSessionId)
     {
         var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.AccessTokenMinutes);
@@ -28,17 +26,15 @@ public class JwtTokenService : IJwtTokenService
         {
             new Claim(ClaimTypes.NameIdentifier, user.AppUserId.ToString()),
             new Claim(JwtRegisteredClaimNames.Sub, user.AppUserId.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim(JwtRegisteredClaimNames.Email,user.Email),
             new Claim(ClaimTypes.Email, user.Email),
             new Claim(ClaimTypes.Name, user.FullName),
-            new Claim("sid", userSessionId.ToString())
+            new Claim("sid",userSessionId.ToString())
         };
-
         foreach (var role in roles)
         {
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
-
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.SecretKey));
 
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

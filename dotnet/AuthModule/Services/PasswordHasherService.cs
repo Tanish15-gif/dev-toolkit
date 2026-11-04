@@ -1,6 +1,6 @@
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class PasswordHasherService : IPasswordHasherService
 {
@@ -10,12 +10,14 @@ public class PasswordHasherService : IPasswordHasherService
         {
             throw new ArgumentException("Password is required");
         }
+        DevToolkit.Infrastructure.Helpers.AuthValidation.ValidateNewPassword(password);
         return BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
     }
 
     public bool VerifyPassword(string password, string passwordHash)
     {
-        if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(passwordHash))
+        if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(passwordHash) ||
+            System.Text.Encoding.UTF8.GetByteCount(password) > 72)
         {
             return false;
         }

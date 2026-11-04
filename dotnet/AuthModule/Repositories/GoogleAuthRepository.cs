@@ -1,14 +1,15 @@
+using DevToolkit.Auth.Exceptions;
 using Microsoft.EntityFrameworkCore;
-using TanishElectronics.Api.Data;
-using TanishElectronics.Api.Entities;
-using TanishElectronics.Api.Interfaces.Repositories.Auth;
+using DevToolkit.Auth.Interfaces;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Interfaces.Repositories;
 
-namespace TanishElectronics.Api.Repositories.Auth;
+namespace DevToolkit.Auth.Repositories;
 
 public class GoogleAuthRepository : IGoogleAuthRepository
 {
-    private readonly TanishElectronicsDbContext _dbContext;
-    public GoogleAuthRepository(TanishElectronicsDbContext dbContext)
+    private readonly IAuthDbContext _dbContext;
+    public GoogleAuthRepository(IAuthDbContext dbContext)
     {
         _dbContext = dbContext;
     }
@@ -62,8 +63,11 @@ public class GoogleAuthRepository : IGoogleAuthRepository
             var affectedRows = await _dbContext.PasswordResetSessions
                 .Where(session =>
                     session.PasswordResetSessionId == setupSession.PasswordResetSessionId &&
+                    session.Purpose == "password-setup" &&
                     session.ConsumedAt == null &&
-                    session.ExpiresAt > now
+                    session.ExpiresAt > now &&
+                    session.AppUser.IsActive && session.AppUser.DeletedAt == null &&
+                    session.AppUser.PasswordHash == null
                 )
                 .ExecuteUpdateAsync(setters =>
                     setters.SetProperty(
@@ -72,9 +76,10 @@ public class GoogleAuthRepository : IGoogleAuthRepository
                     )
                 );
 
-            if (affectedRows != 1) throw new InvalidOperationException("Invalid or expired setup session.");
+            if (affectedRows != 1) throw new BadRequestException("Invalid or expired setup session.");
 
-            _dbContext.AppUsers.Update(user);
+            _dbContext.Entry(setupSession).State = EntityState.Detached;
+            // The user is tracked; persist only fields changed by password setup.
 
             await _dbContext.SaveChangesAsync();
 

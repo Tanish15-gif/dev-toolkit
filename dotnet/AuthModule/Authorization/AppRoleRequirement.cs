@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 
-namespace AuthModule.Authorization;
+namespace DevToolkit.Auth.Authorization;
 
 public class AppRoleRequirement : IAuthorizationRequirement
 {

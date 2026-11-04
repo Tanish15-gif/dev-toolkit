@@ -1,17 +1,17 @@
+using DevToolkit.Auth.Exceptions;
 using Google.Apis.Auth;
-using AuthModule.Constants;
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Enums.Auth;
-using AuthModule.Interfaces;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
-using AuthModule.Services.Helpers;
-using AuthModule.Settings;
-using Microsoft.Extensions.DependencyInjection;
+using DevToolkit.Auth.Constants;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Enums;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Settings;
+using DevToolkit.Auth.Services.Helpers;
 using Microsoft.Extensions.Options;
+using DevToolkit.Auth.Interfaces;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class GoogleAuthService : IGoogleAuthService
 {
@@ -24,8 +24,9 @@ public class GoogleAuthService : IGoogleAuthService
     private readonly ITokenService _tokenService;
     private readonly OtpSettings _otpSettings;
     private readonly IPasswordResetTokenService _passwordResetTokenService;
-    private readonly IServiceProvider _serviceProvider;
-
+    private readonly IAuthDbContext _dbContext;
+    private readonly IEnumerable<IUserRegisteredHook> _userRegisteredHooks;
+    private readonly IGoogleIdTokenValidator _googleTokenValidator;
     public GoogleAuthService
     (
         ICustomAuthRepository authRepository,
@@ -37,7 +38,9 @@ public class GoogleAuthService : IGoogleAuthService
         ITokenService tokenService,
         IOptions<OtpSettings> otpOptions,
         IPasswordResetTokenService passwordResetTokenService,
-        IServiceProvider serviceProvider
+        IEnumerable<IUserRegisteredHook> userRegisteredHooks,
+        IAuthDbContext dbContext,
+        IGoogleIdTokenValidator googleTokenValidator
     )
     {
         _authRepository = authRepository;
@@ -49,9 +52,10 @@ public class GoogleAuthService : IGoogleAuthService
         _tokenService = tokenService;
         _otpSettings = otpOptions.Value;
         _passwordResetTokenService = passwordResetTokenService;
-        _serviceProvider = serviceProvider;
+        _dbContext = dbContext;
+        _userRegisteredHooks = userRegisteredHooks;
+        _googleTokenValidator = googleTokenValidator;
     }
-
     public async Task<AuthResponseDto> GoogleLoginAsync(GoogleLoginRequestDto dto)
     {
         ///<section>
@@ -76,13 +80,7 @@ public class GoogleAuthService : IGoogleAuthService
         {
             ///<section>
             /// Validating the Google token from the client Id
-            payload = await GoogleJsonWebSignature.ValidateAsync(
-                dto.IdToken,
-                new GoogleJsonWebSignature.ValidationSettings
-                {
-                    Audience = new[] { _googleAuthSettings.ClientId }
-                }
-            );
+            payload = await _googleTokenValidator.ValidateAsync(dto.IdToken, _googleAuthSettings.ClientId);
             ///</section>
         }
         catch
@@ -99,7 +97,6 @@ public class GoogleAuthService : IGoogleAuthService
             throw new UnauthorizedAccessException("Invalid Google Token");
             /// </section>
         }
-
         /// <section>
         /// Checking if Google values are not null
         if (string.IsNullOrWhiteSpace(payload.Email))
@@ -117,14 +114,16 @@ public class GoogleAuthService : IGoogleAuthService
             throw new UnauthorizedAccessException("Google account identifier was not found.");
         }
         /// </section>
-
         var provider = ExternalLoginProvider.Google.ToString();
         var providerUserId = payload.Subject.Trim();
         var normalizedEmail = AuthHelpers.NormalizeEmail(payload.Email);
 
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
         var externalLogin = await _authRepository.GetExternalLoginAsync(provider, providerUserId);
 
         AppUser? user = externalLogin?.AppUser;
+
+        if (user != null) AuthHelpers.EnsureUserIsActive(user);
 
         var userWasCreated = false;
 
@@ -138,7 +137,7 @@ public class GoogleAuthService : IGoogleAuthService
 
                 user = new AppUser
                 {
-                    ClerkUserId = null,
+
 
                     FullName = string.IsNullOrWhiteSpace(payload.Name)
                         ? payload.Email.Trim()
@@ -170,9 +169,12 @@ public class GoogleAuthService : IGoogleAuthService
 
                 await _authRepository.CreateUserAsync(user);
 
-                await _authRepository.AssignRoleAsync(user.AppUserId, RoleNames.Customer);
+                await _authRepository.AssignRoleAsync(user.AppUserId, RoleNames.User);
 
-                await OnUserRegistered(user);
+                foreach (var hook in _userRegisteredHooks)
+                {
+                    await hook.OnUserRegisteredAsync(user);
+                }
 
                 userWasCreated = true;
 
@@ -187,12 +189,29 @@ public class GoogleAuthService : IGoogleAuthService
             else
             {
                 AuthHelpers.EnsureUserIsActive(user);
+
+                if (!payload.Email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase) &&
+                    string.IsNullOrWhiteSpace(payload.HostedDomain))
+                {
+                    throw new BadRequestException("Sign in with your existing method. This Google account cannot be linked by email alone.");
+                }
             }
 
             // Existing User update profile and all.
 
             if (!userWasCreated)
             {
+                // A password registered against an unverified email is not proof of mailbox ownership.
+                // Prevent pre-registration takeover when the real owner first signs in with Google.
+                if (!user.EmailConfirmed)
+                {
+                    user.PasswordHash = null;
+                    user.PasswordUpdatedAt = null;
+                    user.AccessFailedCount = 0;
+                    user.LockoutEndAt = null;
+                    await _authRepository.RevokeAllRefreshTokensAsync(user.AppUserId,
+                        _authContextAccessor.GetClientIpAddress());
+                }
                 user.EmailConfirmed = true;
                 user.LastLoginAt = DateTime.UtcNow;
                 user.LastSeenAt = DateTime.UtcNow;
@@ -212,6 +231,15 @@ public class GoogleAuthService : IGoogleAuthService
                 }
                 await _authRepository.UpdateUserAsync(user);
             }
+
+        }
+        AuthHelpers.EnsureUserIsActive(user);
+
+        if (externalLogin != null)
+        {
+            user.LastLoginAt = DateTime.UtcNow;
+            user.LastSeenAt = DateTime.UtcNow;
+            await _authRepository.UpdateUserAsync(user);
         }
 
         if (externalLogin == null)
@@ -227,7 +255,6 @@ public class GoogleAuthService : IGoogleAuthService
 
             await _authRepository.AddExternalLoginAsync(newExternalLogin);
         }
-
         var roles = await _authRepository.GetUserRolesAsync(user.AppUserId);
 
         var userSession = await _sessionService.CreateUserSessionAsync(user.AppUserId);
@@ -244,12 +271,14 @@ public class GoogleAuthService : IGoogleAuthService
             "User logged in with Google."
         );
 
-        return _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
+        var response = _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
+        await transaction.CommitAsync();
+        return response;
     }
 
     public async Task<GooglePasswordReauthResponseDto> ReauthenticateGoogleForPasswordAsync(GooglePasswordReauthRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.IdToken)) throw new InvalidOperationException("Google token is required");
+        if (string.IsNullOrWhiteSpace(dto.IdToken)) throw new BadRequestException("Google token is required");
 
         var appUserId = _authContextAccessor.GetAuthenticatedUserId();
 
@@ -257,7 +286,7 @@ public class GoogleAuthService : IGoogleAuthService
 
         if (user == null || !user.IsActive || user.DeletedAt != null) throw new UnauthorizedAccessException("Account not found");
 
-        if (!string.IsNullOrWhiteSpace(user.PasswordHash)) throw new InvalidOperationException("This account already has a password.");
+        if (!string.IsNullOrWhiteSpace(user.PasswordHash)) throw new BadRequestException("This account already has a password.");
 
         var googleProvider = ExternalLoginProvider.Google.ToString();
 
@@ -269,23 +298,13 @@ public class GoogleAuthService : IGoogleAuthService
             )
         );
 
-        if (linkedGoogleAccount == null) throw new InvalidOperationException("No Google account is connected");
+        if (linkedGoogleAccount == null) throw new BadRequestException("No Google account is connected");
 
         GoogleJsonWebSignature.Payload payload;
 
         try
         {
-            payload = await GoogleJsonWebSignature.ValidateAsync(
-                dto.IdToken,
-                new GoogleJsonWebSignature.ValidationSettings
-                {
-                    Audience =
-                        new[]
-                        {
-                            _googleAuthSettings.ClientId
-                        }
-                }
-            );
+            payload = await _googleTokenValidator.ValidateAsync(dto.IdToken, _googleAuthSettings.ClientId);
         }
         catch
         {
@@ -320,6 +339,7 @@ public class GoogleAuthService : IGoogleAuthService
 
         var setupSession = new PasswordResetSession
         {
+            Purpose = "password-setup",
             AppUserId = user.AppUserId,
             TokenHash = setUpTokenHash,
 
@@ -336,13 +356,5 @@ public class GoogleAuthService : IGoogleAuthService
             SetupToken = plainSetUpToken,
             ExpiresInSeconds = _otpSettings.ResetTokenExpiryMinutes * 60
         };
-    }
-
-    private async Task OnUserRegistered(AppUser user)
-    {
-        // Resolve the optional hook — if not registered in the host project, skip silently
-        var hook = _serviceProvider.GetService<IUserRegisteredHook>();
-        if (hook != null)
-            await hook.OnUserRegisteredAsync(user);
     }
 }

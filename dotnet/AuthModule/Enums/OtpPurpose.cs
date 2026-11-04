@@ -1,4 +1,4 @@
-namespace AuthModule.Enums;
+namespace DevToolkit.Auth.Enums;
 
 public enum OtpPurpose
 {

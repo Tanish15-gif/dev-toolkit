@@ -1,12 +1,12 @@
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Enums.Auth;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
-using AuthModule.Settings;
 using Microsoft.Extensions.Options;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Enums;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Settings;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class TokenService : ITokenService
 {
@@ -16,7 +16,6 @@ public class TokenService : ITokenService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IUserAgentParser _userAgentParser;
     private readonly JwtSettings _jwtSettings;
-
     public TokenService
     (
         ICustomAuthRepository authRepository,
@@ -34,7 +33,6 @@ public class TokenService : ITokenService
         _userAgentParser = userAgentParser;
         _jwtSettings = jwtOptions.Value;
     }
-
     public async Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
@@ -63,6 +61,9 @@ public class TokenService : ITokenService
 
         if (storedToken.RevokedAt != null)
         {
+            if (storedToken.UserSessionId.HasValue)
+                await _authRepository.RevokeUserSessionAsync(storedToken.AppUserId,
+                    storedToken.UserSessionId.Value, _authContextAccessor.GetClientIpAddress());
             await _authEventLogger.LogAsync(
                 storedToken.AppUserId,
                 storedToken.AppUser.Email,
@@ -86,11 +87,11 @@ public class TokenService : ITokenService
 
             throw new UnauthorizedAccessException("Refresh token expired.");
         }
-
         if (
             storedToken.UserSessionId == null ||
             storedToken.UserSession == null ||
             storedToken.UserSession.RevokedAt != null
+            || storedToken.UserSession.CreatedAt.AddDays(_jwtSettings.AbsoluteSessionDays) <= DateTime.UtcNow
         ) throw new UnauthorizedAccessException("Session is not longer active");
 
         var user = storedToken.AppUser;
@@ -103,13 +104,25 @@ public class TokenService : ITokenService
         var newRefreshToken = _jwtTokenService.GenerateRefreshToken();
         var newRefreshTokenHash = _jwtTokenService.HashRefreshToken(newRefreshToken);
 
-        await _authRepository.RevokeRefreshTokenAsync(
-            storedToken,
-            _authContextAccessor.GetClientIpAddress(),
-            newRefreshTokenHash
-        );
-
-        await SaveRefreshTokenAsync(user.AppUserId, storedToken.UserSessionId.Value, newRefreshToken);
+        var now = DateTime.UtcNow;
+        var replacement = new RefreshToken
+        {
+            AppUserId = user.AppUserId,
+            UserSessionId = storedToken.UserSessionId.Value,
+            TokenHash = newRefreshTokenHash,
+            CreatedAt = now,
+            ExpiresAt = new[] { now.AddDays(_jwtSettings.RefreshTokenDays),
+                storedToken.UserSession.CreatedAt.AddDays(_jwtSettings.AbsoluteSessionDays) }.Min(),
+            CreatedByIp = _authContextAccessor.GetClientIpAddress(),
+            UserAgent = _authContextAccessor.GetUserAgent()
+        };
+        if (!await _authRepository.RotateRefreshTokenAsync(storedToken, replacement,
+            _authContextAccessor.GetClientIpAddress()))
+        {
+            await _authRepository.RevokeUserSessionAsync(user.AppUserId,
+                storedToken.UserSessionId.Value, _authContextAccessor.GetClientIpAddress());
+            throw new UnauthorizedAccessException("Invalid refresh token.");
+        }
 
         user.LastSeenAt = DateTime.UtcNow;
 
@@ -144,7 +157,6 @@ public class TokenService : ITokenService
             return;
         }
 
-        var now = DateTime.UtcNow;
         var revokedByIp = _authContextAccessor.GetClientIpAddress();
 
         var tokenHash = _jwtTokenService.HashRefreshToken(dto.RefreshToken);
@@ -153,21 +165,14 @@ public class TokenService : ITokenService
             tokenHash
         );
 
-        if (storedToken == null || storedToken.RevokedAt != null)
+        if (storedToken == null)
         {
             return;
         }
 
-        if (storedToken!.UserSession != null && storedToken.UserSession.RevokedAt == null)
-        {
-            storedToken.UserSession.RevokedAt = now;
-            storedToken.UserSession.RevokedByIp = revokedByIp;
-        }
-
-        await _authRepository.RevokeRefreshTokenAsync(
-            storedToken,
-            revokedByIp
-        );
+        if (storedToken.UserSessionId.HasValue)
+            await _authRepository.RevokeUserSessionAsync(storedToken.AppUserId,
+                storedToken.UserSessionId.Value, revokedByIp);
 
         var user = storedToken.AppUser;
         user.LastLogoutAt = DateTime.UtcNow;
@@ -182,7 +187,39 @@ public class TokenService : ITokenService
             "User logged out successfully."
         );
     }
+    public async Task<UserSession> CreateUserSessionAsync(int appUserId)
+    {
+        var userAgent = _authContextAccessor.GetUserAgent();
 
+        var details = _userAgentParser.Parse(userAgent);
+
+        var now = DateTime.UtcNow;
+
+        var session = new UserSession
+        {
+            AppUserId = appUserId,
+
+            DeviceType = details.DeviceType,
+            DeviceName = details.DeviceName,
+
+            BrowserName = details.BrowserName,
+            BrowserVersion = details.BrowserVersion,
+
+            OperatingSystem =
+                details.OperatingSystem,
+
+            UserAgent = userAgent,
+            IpAddress = _authContextAccessor.GetClientIpAddress(),
+
+            CreatedAt = now,
+            LastSeenAt = now,
+
+            RevokedAt = null,
+            RevokedByIp = null
+        };
+
+        return await _authRepository.AddUserSessionAsync(session);
+    }
     public async Task SaveRefreshTokenAsync(int appUserId, Guid userSessionId, string refreshToken)
     {
         var tokenHash = _jwtTokenService.HashRefreshToken(refreshToken);
@@ -192,7 +229,7 @@ public class TokenService : ITokenService
             AppUserId = appUserId,
             UserSessionId = userSessionId,
             TokenHash = tokenHash,
-            ExpiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenDays),
+            ExpiresAt = DateTime.UtcNow.AddDays(Math.Min(_jwtSettings.RefreshTokenDays, _jwtSettings.AbsoluteSessionDays)),
             CreatedAt = DateTime.UtcNow,
             CreatedByIp = _authContextAccessor.GetClientIpAddress(),
             UserAgent = _authContextAccessor.GetUserAgent()

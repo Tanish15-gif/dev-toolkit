@@ -1,4 +1,4 @@
-namespace AuthModule.Settings;
+namespace DevToolkit.Auth.Settings;
 
 public class GoogleAuthSettings
 {

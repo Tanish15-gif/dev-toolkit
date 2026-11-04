@@ -1,14 +1,15 @@
-using AuthModule.Constants;
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Enums.Auth;
-using AuthModule.Interfaces;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
-using AuthModule.Services.Helpers;
-using Microsoft.Extensions.DependencyInjection;
+using DevToolkit.Auth.Exceptions;
+using DevToolkit.Auth.Constants;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Enums;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Services.Helpers;
+using DevToolkit.Auth.Settings;
+using DevToolkit.Auth.Interfaces;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class CredentialAuthService : ICredentialAuthService
 {
@@ -18,8 +19,8 @@ public class CredentialAuthService : ICredentialAuthService
     private readonly ISessionService _sessionService;
     private readonly IPasswordHasherService _hasherService;
     private readonly ITokenService _tokenService;
-    private readonly IServiceProvider _serviceProvider;
-
+    private readonly IAuthDbContext _dbContext;
+    private readonly IEnumerable<IUserRegisteredHook> _userRegisteredHooks;
     public CredentialAuthService
     (
         ICustomAuthRepository authRepository,
@@ -28,7 +29,8 @@ public class CredentialAuthService : ICredentialAuthService
         ISessionService sessionService,
         IPasswordHasherService hasherService,
         ITokenService tokenService,
-        IServiceProvider serviceProvider
+        IEnumerable<IUserRegisteredHook> userRegisteredHooks,
+        IAuthDbContext dbContext
     )
     {
         _authRepository = authRepository;
@@ -37,9 +39,9 @@ public class CredentialAuthService : ICredentialAuthService
         _sessionService = sessionService;
         _hasherService = hasherService;
         _tokenService = tokenService;
-        _serviceProvider = serviceProvider;
+        _dbContext = dbContext;
+        _userRegisteredHooks = userRegisteredHooks;
     }
-
     public async Task<AuthResponseDto> RegisterAsync(RegisterRequestDto dto)
     {
         ValidateRegisterRequest(dto);
@@ -58,12 +60,11 @@ public class CredentialAuthService : ICredentialAuthService
                 AuthFailureReason.EmailAlreadyExists.ToString()
             );
 
-            throw new InvalidOperationException("Email already exists.");
+            throw new AuthConflictException("Email already exists.");
         }
-
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
         var user = new AppUser
         {
-            ClerkUserId = null,
             FullName = dto.FullName.Trim(),
             Email = dto.Email.Trim(),
             NormalizedEmail = normalizedEmail,
@@ -80,9 +81,12 @@ public class CredentialAuthService : ICredentialAuthService
 
         await _authRepository.CreateUserAsync(user);
 
-        await _authRepository.AssignRoleAsync(user.AppUserId, RoleNames.Customer);
+        await _authRepository.AssignRoleAsync(user.AppUserId, RoleNames.User);
 
-        await OnUserRegistered(user);
+        foreach (var hook in _userRegisteredHooks)
+        {
+            await hook.OnUserRegisteredAsync(user);
+        }
 
         var roles = await _authRepository.GetUserRolesAsync(user.AppUserId);
 
@@ -100,9 +104,10 @@ public class CredentialAuthService : ICredentialAuthService
             "User registered successfully."
         );
 
-        return _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
+        var response = _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
+        await transaction.CommitAsync();
+        return response;
     }
-
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto dto)
     {
         ValidateLoginRequest(dto);
@@ -120,9 +125,8 @@ public class CredentialAuthService : ICredentialAuthService
                 false,
                 AuthFailureReason.UserNotFound.ToString()
             );
-            throw new UnauthorizedAccessException("Invalid email and password");
+            throw new UnauthorizedAccessException("Invalid email or password.");
         }
-
         if (!user.IsActive || user.DeletedAt != null)
         {
             await _authEventLogger.LogAsync(
@@ -135,7 +139,6 @@ public class CredentialAuthService : ICredentialAuthService
 
             throw new UnauthorizedAccessException("Invalid email or password.");
         }
-
         if (user.LockoutEndAt != null && user.LockoutEndAt > DateTime.UtcNow)
         {
             await _authEventLogger.LogAsync(
@@ -146,17 +149,16 @@ public class CredentialAuthService : ICredentialAuthService
                 AuthFailureReason.AccountLocked.ToString()
             );
 
-            throw new UnauthorizedAccessException("Account is temporarily locked.");
+            throw new UnauthorizedAccessException("Invalid email or password.");
         }
 
         var isPasswordValid = _hasherService.VerifyPassword(dto.Password, user.PasswordHash ?? "");
 
         if (!isPasswordValid)
         {
-            user.AccessFailedCount += 1;
-            if (user.AccessFailedCount >= 5)
+            var failureCount = await _authRepository.RecordFailedLoginAttemptAsync(user.AppUserId);
+            if (failureCount >= 5)
             {
-                user.LockoutEndAt = DateTime.UtcNow.AddMinutes(15);
                 await _authEventLogger.LogAsync(
                     user.AppUserId,
                     user.Email,
@@ -165,8 +167,6 @@ public class CredentialAuthService : ICredentialAuthService
                     "Account locked after too many failed login attempts."
                 );
             }
-            await _authRepository.UpdateUserAsync(user);
-
             await _authEventLogger.LogAsync(
                 user.AppUserId,
                 user.Email,
@@ -175,15 +175,11 @@ public class CredentialAuthService : ICredentialAuthService
                 AuthFailureReason.InvalidPassword.ToString()
             );
 
-            throw new UnauthorizedAccessException("Invalid email or password");
+            throw new UnauthorizedAccessException("Invalid email or password.");
         }
-
-        user.AccessFailedCount = 0;
-        user.LockoutEndAt = null;
-        user.LastLoginAt = DateTime.UtcNow;
-        user.LastSeenAt = DateTime.UtcNow;
-
-        await _authRepository.UpdateUserAsync(user);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        if (!await _authRepository.CompletePasswordLoginAsync(user.AppUserId, user.PasswordHash!))
+            throw new UnauthorizedAccessException("Invalid email or password.");
 
         var roles = await _authRepository.GetUserRolesAsync(user.AppUserId);
 
@@ -201,38 +197,33 @@ public class CredentialAuthService : ICredentialAuthService
             "User logged in successfully"
         );
 
-        return _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
-    }
-
-    private async Task OnUserRegistered(AppUser user)
-    {
-        // Resolve the optional hook — if not registered in the host project, skip silently
-        var hook = _serviceProvider.GetService<IUserRegisteredHook>();
-        if (hook != null)
-            await hook.OnUserRegisteredAsync(user);
+        var response = _jwtTokenService.GenerateAuthResponse(user, roles, refreshToken, userSession.UserSessionId);
+        await transaction.CommitAsync();
+        return response;
     }
 
     private static void ValidateRegisterRequest(RegisterRequestDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.FullName)) throw new InvalidOperationException("Full name is required.");
+        System.ComponentModel.DataAnnotations.Validator.ValidateObject(dto,
+            new System.ComponentModel.DataAnnotations.ValidationContext(dto), true);
+        if (string.IsNullOrWhiteSpace(dto.FullName)) throw new BadRequestException("Full name is required.");
 
-        if (string.IsNullOrWhiteSpace(dto.Email)) throw new InvalidOperationException("Email is required.");
+        if (string.IsNullOrWhiteSpace(dto.Email)) throw new BadRequestException("Email is required.");
 
-        if (string.IsNullOrWhiteSpace(dto.Password)) throw new InvalidOperationException("Password is required.");
+        if (string.IsNullOrWhiteSpace(dto.Password)) throw new BadRequestException("Password is required.");
 
-        if (dto.Password.Length < 8) throw new InvalidOperationException("Password must be at least 8 characters.");
+        if (dto.Password.Length < 8) throw new BadRequestException("Password must be at least 8 characters.");
     }
-
     private static void ValidateLoginRequest(LoginRequestDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Email))
         {
-            throw new InvalidOperationException("Email is required.");
+            throw new BadRequestException("Email is required.");
         }
 
         if (string.IsNullOrWhiteSpace(dto.Password))
         {
-            throw new InvalidOperationException("Password is required.");
+            throw new BadRequestException("Password is required.");
         }
     }
 }

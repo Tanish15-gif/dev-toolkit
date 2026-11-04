@@ -1,10 +1,10 @@
-using AuthModule.DTOs.Auth;
-using AuthModule.Entities;
-using AuthModule.Exceptions;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Exceptions;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class SessionService : ISessionService
 {
@@ -12,7 +12,6 @@ public class SessionService : ISessionService
     private readonly ICustomAuthRepository _authRepository;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IUserAgentParser _userAgentParser;
-
     public SessionService
     (
         IAuthContextAccessor authContextAccessor,
@@ -26,7 +25,6 @@ public class SessionService : ISessionService
         _jwtTokenService = jwtTokenService;
         _userAgentParser = userAgentParser;
     }
-
     public async Task SignOutOtherSessionsAsync(SignOutOtherSessionsRequestDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.CurrentRefreshToken)) throw new UnauthorizedAccessException("Current session was not found.");
@@ -41,6 +39,8 @@ public class SessionService : ISessionService
             currentToken == null ||
             currentToken.AppUserId != appUserId ||
             currentToken.RevokedAt != null ||
+            currentToken.UserSessionId == null || currentToken.UserSession == null ||
+            currentToken.UserSession.RevokedAt != null ||
             currentToken.ExpiresAt <= DateTime.UtcNow
         )
         {

@@ -1,13 +1,16 @@
+using DevToolkit.Infrastructure.RateLimiting;
+using DevToolkit.Auth.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using AuthModule.Constants;
-using AuthModule.DTOs.Auth;
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.Constants;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Controllers;
+namespace DevToolkit.Auth.Controllers;
 
 [ApiController]
+[ServiceFilter(typeof(AuthExceptionFilter))]
 [EnableRateLimiting(RateLimitPolicies.FormSubmit)]
 [Route("auth/custom")]
 public class CustomAuthController : ControllerBase
@@ -96,7 +99,7 @@ public class CustomAuthController : ControllerBase
     }
     [EnableRateLimiting(RateLimitPolicies.PublicRead)]
     [HttpGet("security-summary")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> GetSecuritySummary()
     {
         var response = await _authService.GetSecuritySummaryAsync();
@@ -106,7 +109,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("change-password")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto dto)
     {
         await _authService.ChangePasswordAsync(dto);
@@ -120,7 +123,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("set-password/google-reauth")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> ReauthenticateGoogleForPassword([FromBody] GooglePasswordReauthRequestDto dto)
     {
         var response = await _authService.ReauthenticateGoogleForPasswordAsync(dto);
@@ -130,7 +133,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("set-password/complete")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> CompleteSetPassword([FromBody] CompleteSetPasswordRequestDto dto)
     {
         await _authService.CompleteSetPasswordAsync(dto);
@@ -144,7 +147,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("sessions/logout-others")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> SignOutOtherSessions([FromBody] SignOutOtherSessionsRequestDto dto)
     {
         await _authService.SignOutOtherSessionsAsync(dto);
@@ -157,7 +160,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("sessions/logout-all")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> SignOutAllSessions()
     {
         await _authService.SignOutAllSessionsAsync();
@@ -169,7 +172,7 @@ public class CustomAuthController : ControllerBase
     }
 
     [HttpGet("sessions")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     [EnableRateLimiting(RateLimitPolicies.PublicRead)]
     public async Task<IActionResult> GetActiveSessions()
     {
@@ -180,7 +183,7 @@ public class CustomAuthController : ControllerBase
 
     [EnableRateLimiting(RateLimitPolicies.AuthAttempt)]
     [HttpPost("sessions/{userSessionId:guid}/revoke")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public async Task<IActionResult> RevokeSession(Guid userSessionId)
     {
         await _authService.RevokeSessionAsync(userSessionId);
@@ -192,7 +195,7 @@ public class CustomAuthController : ControllerBase
     }
 
     [HttpGet("sessions/validate")]
-    [Authorize(Policy = AppPolicies.AdminOrCustomer)]
+    [Authorize(AuthenticationSchemes = AuthSchemes.CustomJwt)]
     public IActionResult ValidateCurrentSession()
     {
         return NoContent();

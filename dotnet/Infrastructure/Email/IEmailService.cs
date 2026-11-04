@@ -7,7 +7,8 @@ namespace DevToolkit.Infrastructure.Email;
 public interface IEmailService
 {
     /// <summary>Sends a plain/HTML email.</summary>
-    Task SendAsync(
+    Task SendAsync
+    (
         string toEmail,
         string subject,
         string htmlBody,

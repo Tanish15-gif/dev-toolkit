@@ -1,7 +1,7 @@
-using AuthModule.DTOs.Auth;
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.DTOs.Auth;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class CustomAuthService : ICustomAuthService
 {

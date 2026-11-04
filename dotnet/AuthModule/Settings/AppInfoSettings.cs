@@ -1,4 +1,4 @@
-namespace AuthModule.Settings;
+namespace DevToolkit.Auth.Settings;
 
 /// <summary>
 /// Basic app branding used in outgoing emails.

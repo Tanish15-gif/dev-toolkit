@@ -1,4 +1,4 @@
-namespace AuthModule.Models;
+namespace DevToolkit.Auth.Models;
 
 /// <summary>Parsed result from a raw HTTP User-Agent string.</summary>
 /// <param name="DeviceType">Desktop | Mobile | Tablet | TV</param>

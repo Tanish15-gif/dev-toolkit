@@ -1,6 +1,6 @@
-using AuthModule.Entities;
+using DevToolkit.Auth.Entities;
 
-namespace AuthModule.Interfaces.Repositories;
+namespace DevToolkit.Auth.Interfaces.Repositories;
 
 public interface ISessionRepository
 {
@@ -12,5 +12,5 @@ public interface ISessionRepository
     Task<int> GetActiveUserSessionCountAsync(int appUserId);
     Task<List<UserSession>> GetActiveUserSessionsAsync(int appUserId);
     Task<bool> RevokeUserSessionAsync(int appUserId, Guid userSessionId, string? revokedByIp);
-    Task<bool> IsSessionActiveAsync(Guid sessionId, int appUserId);
+    Task<bool> IsSessionActiveAsync(Guid sessionId, int appUserId, CancellationToken cancellationToken = default);
 }

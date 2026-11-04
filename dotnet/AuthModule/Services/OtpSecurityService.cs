@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
-using AuthModule.Interfaces.Services;
-using AuthModule.Settings;
 using Microsoft.Extensions.Options;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Settings;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class OtpSecurityService : IOtpSecurityService
 {
@@ -24,13 +24,11 @@ public class OtpSecurityService : IOtpSecurityService
         {
             throw new InvalidOperationException("OTP hash key must be valid Base64.");
         }
-
         if (_hashKey.Length < 32)
         {
             throw new InvalidOperationException("OTP hash key must be at least 32 bytes.");
         }
     }
-
     public string GenerateCode()
     {
         var number = RandomNumberGenerator.GetInt32(0, 1_000_000);

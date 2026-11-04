@@ -1,6 +1,6 @@
-using AuthModule.Models;
+using DevToolkit.Auth.Models;
 
-namespace AuthModule.Interfaces.Services;
+namespace DevToolkit.Auth.Interfaces.Services;
 
 public interface IUserAgentParser
 {

@@ -1,12 +1,11 @@
 using System.Security.Claims;
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services.Context;
+namespace DevToolkit.Auth.Services.Context;
 
 public class AuthContextAccessor : IAuthContextAccessor
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
-
     public AuthContextAccessor
     (
         IHttpContextAccessor httpContextAccessor
@@ -14,7 +13,6 @@ public class AuthContextAccessor : IAuthContextAccessor
     {
         _httpContextAccessor = httpContextAccessor;
     }
-
     public Guid GetAuthenticatedSessionId()
     {
         var sessionIdValue =
@@ -50,23 +48,17 @@ public class AuthContextAccessor : IAuthContextAccessor
             return null;
         }
 
-        var forwardedFor =
-            httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-
-        if (!string.IsNullOrWhiteSpace(forwardedFor))
-        {
-            return forwardedFor.Split(",")[0].Trim();
-        }
-
+        // ForwardedHeaders middleware handles only explicitly trusted proxies.
         return httpContext.Connection.RemoteIpAddress?.ToString();
     }
 
     public string? GetUserAgent()
     {
-        return _httpContextAccessor.HttpContext?
+        var value = _httpContextAccessor.HttpContext?
             .Request
             .Headers
             .UserAgent
             .ToString();
+        return value?.Length > 500 ? value[..500] : value;
     }
 }

@@ -1,15 +1,14 @@
-using AuthModule.Entities;
-using AuthModule.Enums.Auth;
-using AuthModule.Interfaces.Repositories;
-using AuthModule.Interfaces.Services;
+using DevToolkit.Auth.Entities;
+using DevToolkit.Auth.Enums;
+using DevToolkit.Auth.Interfaces.Repositories;
+using DevToolkit.Auth.Interfaces.Services;
 
-namespace AuthModule.Services.Context;
+namespace DevToolkit.Auth.Services.Context;
 
 public class AuthEventLogger : IAuthEventLogger
 {
     private readonly ICustomAuthRepository _authRepository;
     private readonly IAuthContextAccessor _authContextAccessor;
-
     public AuthEventLogger
     (
         IAuthContextAccessor authContextAccessor,
@@ -19,7 +18,6 @@ public class AuthEventLogger : IAuthEventLogger
         _authContextAccessor = authContextAccessor;
         _authRepository = authRepository;
     }
-
     public async Task LogAsync(
         int? appUserId,
         string? email,

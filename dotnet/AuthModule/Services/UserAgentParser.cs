@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
-using AuthModule.Interfaces.Services;
-using AuthModule.Models;
+using DevToolkit.Auth.Interfaces.Services;
+using DevToolkit.Auth.Models;
 
-namespace AuthModule.Services;
+namespace DevToolkit.Auth.Services;
 
 public class UserAgentParser : IUserAgentParser
 {
@@ -111,7 +111,6 @@ public class UserAgentParser : IUserAgentParser
             _ => "Unknown device"
         };
     }
-
     private static string? ExtractVersion(string userAgent, string marker)
     {
         var match = Regex.Match(
