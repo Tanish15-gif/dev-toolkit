@@ -14,7 +14,7 @@ The order is: **project files → configuration → build → secrets → databa
 
 **BeautyParlour** is the reference application used for the setup screenshots and Thunder Client examples. The written commands use `YourApp` so you can substitute your own application name.
 
-![BeautyParlour project structure with AuthModule, Program.cs, configuration, and one application project file](https://github.com/user-attachments/assets/52833d08-043a-4790-8f1f-e9a25d0045c6)
+![BeautyParlour project structure with AuthModule, Program.cs, configuration, and one application project file](https://github.com/user-attachments/assets/514d53e5-2509-4140-a5f9-a07b1dd36abe)
 
 *BeautyParlour Project Reference — AuthModule integrated into the application.*
 
@@ -137,7 +137,7 @@ Restore is performed at the build checkpoint. Align any EF packages already in y
 
 For manual XML merging, copy only the relevant `PackageReference` entries into an `ItemGroup` in your own project. Retain the EF Design entry's `PrivateAssets`/`IncludeAssets` metadata. Preserve other packages, project settings, and an existing `UserSecretsId`; do not replace the whole file or introduce a second `.csproj`.
 
-![BeautyParlour.csproj showing the authentication package references alongside the application's OpenAPI package](https://github.com/user-attachments/assets/7a43baf7-e7f2-4309-8ef4-9c7883b2caaf)
+![BeautyParlour.csproj showing the authentication package references alongside the application's OpenAPI package](https://github.com/user-attachments/assets/82fc757f-1ae9-467f-af31-f08bff245077)
 
 *BeautyParlour Project Reference — authentication dependencies in the application's own project file. Each application initializes its own User Secrets store; retain your own UserSecretsId.*
 
@@ -288,7 +288,7 @@ Use one prefix, such as `YourApp`. Do not enter a path, spaces, a hyphenated nam
 
 Text replacement does not rename filenames. `YourApp.Auth` code can live in `YourApp.Api.csproj`; namespace and project filenames need not be identical. Keep replacement scoped to application code, excluding this guide and repository links. Lowercase rate-policy names remain internal identifiers. Later snippets with the original prefix need its corresponding replacement if you chose this step. [VS Code search and replace](https://code.visualstudio.com/docs/editing/codebasics#_search-across-files)
 
-![VS Code Search panel showing DevToolkit replaced with BeautyParlour](https://github.com/user-attachments/assets/8f39843f-9710-4baf-8163-0dae8d61cea2)
+![VS Code Search panel showing DevToolkit replaced with BeautyParlour](https://github.com/user-attachments/assets/596599c7-3ffc-4af6-9113-eb2bd2af0ecc)
 
 *BeautyParlour Project Reference — renaming the code prefix in VS Code.*
 
@@ -397,7 +397,7 @@ dotnet ef database update --context AuthDbContext
 
 This creates the database if your account has permission, applies pending migrations, and finishes with **Done**. The API does not run migrations automatically during startup.
 
-![BeautyParlour terminal showing a successful build, application of the InitialAuth migration, and Done](https://github.com/user-attachments/assets/aa7e3857-996e-490c-86d9-3f11e1f86697)
+![BeautyParlour terminal showing a successful build, application of the InitialAuth migration, and Done](https://github.com/user-attachments/assets/95d31e16-08e0-4977-b92e-e59b7517548c)
 
 *BeautyParlour Project Reference — the initial authentication migration applied successfully.*
 
@@ -405,7 +405,7 @@ If you already applied the migrations, run the same update command again. EF app
 
 Expected tables are `AppUsers`, `Roles`, `AppUserRoles`, `ExternalLogins`, `UserSessions`, `RefreshTokens`, `OtpCodes`, `PasswordResetSessions`, and `UserAuthEvents`, plus `__EFMigrationsHistory`. Role records are `User`, `Admin`, and `Owner`; no admin account is created.
 
-![SQL Server query results showing the nine BeautyParlour authentication tables and the EF migrations history table](https://github.com/user-attachments/assets/645370bf-2828-44b6-b395-1c0dada9e868)
+![SQL Server query results showing the nine BeautyParlour authentication tables and the EF migrations history table](https://github.com/user-attachments/assets/c1f7cedf-236b-4ba6-8fbc-b9f4f99e47a0)
 
 *BeautyParlour Project Reference — nine authentication tables plus __EFMigrationsHistory in SQL Server.*
 
@@ -425,7 +425,7 @@ dotnet run
 
 That is the startup command. It builds and starts your application. [Microsoft dotnet run documentation](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-run)
 
-![BeautyParlour terminal showing dotnet run and the API listening on localhost port 5148 in Development](https://github.com/user-attachments/assets/795dd197-1b2c-4dfb-9915-a1b7b389a51c)
+![BeautyParlour terminal showing dotnet run and the API listening on localhost port 5148 in Development](https://github.com/user-attachments/assets/c688a57e-3516-45f4-acdb-d0567e3c9b7a)
 
 *BeautyParlour Project Reference — `dotnet run` starts this app using its existing launch profile.*
 
@@ -457,7 +457,7 @@ GET http://localhost:5148/health/ready
 
 Expected: **200 OK**, body `Healthy`. A 503 means a readiness check failed, commonly because the database or auth tables are unavailable.
 
-![Thunder Client GET health readiness request returning 200 OK and Healthy](https://github.com/user-attachments/assets/a85ea550-ff0b-40a3-b103-a72e8efc7f0a)
+![Thunder Client GET health readiness request returning 200 OK and Healthy](https://github.com/user-attachments/assets/8ac83ae5-0729-44e3-b9f7-80a88af17208)
 
 *BeautyParlour Project Reference — `GET /health/ready` returns `200 OK` and `Healthy`.*
 
@@ -479,7 +479,7 @@ Use **Auth → None** and this body:
 
 Expected: **200 OK**, containing `accessToken`, `refreshToken`, `accessTokenExpiresAt`, and a `user` with the `User` role. An already-registered email returns 409; log in with that account or use a different test address.
 
-![Thunder Client registration request returning 200 OK with its authentication response](https://github.com/user-attachments/assets/78ed66aa-8560-4897-b0a5-7bead1bf2803)
+![Thunder Client registration request returning 200 OK with its authentication response](https://github.com/user-attachments/assets/611dcbf7-a69b-4e4a-897d-db5acd0b4bc9)
 
 *BeautyParlour Project Reference — `POST /auth/custom/register` creates a test account. The request body above matches this example. Use a fresh test email for registration, then use that same email and password for login.*
 
@@ -500,7 +500,7 @@ Use **Auth → None** and the registered credentials:
 
 Expected: **200 OK** with fresh tokens. Keep the actual response in your local API client; use its tokens for the next requests. Do not copy token values from screenshots.
 
-![Thunder Client login request returning 200 OK with its authentication response](https://github.com/user-attachments/assets/ae62a57e-0be8-4645-b150-9c8815bd157d)
+![Thunder Client login request returning 200 OK with its authentication response](https://github.com/user-attachments/assets/8c08552e-fa89-4532-b49d-bd60439ec96a)
 
 *BeautyParlour Project Reference — `POST /auth/custom/login` authenticates the registered test account.*
 
@@ -514,7 +514,7 @@ In **Auth → Bearer**, paste the login response's `accessToken` without JSON qu
 
 Expected: **204 No Content**, empty body. With **Auth → None**, the request should return **401 Unauthorized**.
 
-![Thunder Client Bearer session validation returning 204 No Content for the test account](https://github.com/user-attachments/assets/4c218db8-5505-43cb-ace3-54445da7b7fc)
+![Thunder Client Bearer session validation returning 204 No Content for the test account](https://github.com/user-attachments/assets/27cf2116-0975-4026-8400-e0b1325fe92e)
 
 *BeautyParlour Project Reference — `GET /auth/custom/sessions/validate` accepts an active authenticated session.*
 
@@ -558,7 +558,7 @@ Use **Auth → None** and the replacement refresh token:
 
 Expected: **200 OK** with a logout message.
 
-![Thunder Client logout request returning 200 OK and Logged out successfully for the test session](https://github.com/user-attachments/assets/d72bd6fd-46cf-4056-a371-0c5162f978a9)
+![Thunder Client logout request returning 200 OK and Logged out successfully for the test session](https://github.com/user-attachments/assets/c4e0426b-e786-43f7-8297-f9186de33cb6)
 
 *BeautyParlour Project Reference — `POST /auth/custom/logout` returns a successful logout response.*
 

@@ -1,4 +1,6 @@
-# DevToolkit
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/1efbef4b-0335-4ab0-a753-ecf4a197f55e" alt="DevToolkit" width="560">
+</p>
 
 A reusable authentication starter for **ASP.NET Core 10**, built around a single Web API project and a dedicated `AuthModule`.
 
@@ -8,9 +10,10 @@ For installation and integration, follow the [Setup Guide](SetupGuide.md).
 
 ## Reference Project Preview
 
-![Reference Project Preview: sign-in interface with email/password and Google sign-in](https://github.com/user-attachments/assets/c6c91aa7-ba38-45eb-bd80-482cad0501aa)
+![Reference Project Preview: sign-in interface with email/password and Google sign-in](https://github.com/user-attachments/assets/79dd35d2-f211-4b40-bd7c-937e5120a976)
 
-A reference sign-in interface showing how an application can present email/password and Google authentication. The frontend shown is a visual reference; DevToolkit supplies the backend API, and applications provide their own UI. API testing is covered in the [BeautyParlour Project Reference](SetupGuide.md#beautyparlour-project-reference).
+A reference sign-in interface showing how an application can present email/password and Google authentication. The frontend shown is a visual reference; DevToolkit supplies the backend API, and applications provide their own UI.
+API testing is covered in the [BeautyParlour Project Reference](SetupGuide.md#beautyparlour-project-reference).
 
 ## Features
 
